@@ -1,0 +1,32 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configure Voice Assistant LLM",
+        "description": "Set up the LLM provider for your voice assistant.",
+        "data": {
+          "provider": "LLM Provider",
+          "api_key": "API Key",
+          "model": "Model",
+          "temperature": "Temperature",
+          "max_tokens": "Max Tokens"
+        },
+        "data_description": {
+          "provider": "Select the LLM provider to use",
+          "api_key": "Your API key for the selected provider",
+          "model": "The model identifier to use",
+          "temperature": "Controls response creativity (0.0-1.0)",
+          "max_tokens": "Maximum number of tokens in responses"
+        }
+      }
+    },
+    "error": {
+      "invalid_api_key": "Invalid API key",
+      "cannot_connect": "Failed to connect to the LLM provider",
+      "unknown": "An unknown error occurred"
+    },
+    "abort": {
+      "already_configured": "This integration is already configured"
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "domain": "voice_assistant",
+  "name": "Voice Assistant LLM",
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": ["conversation"],
+  "documentation": "https://github.com/your-username/voice_assistant",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/your-username/voice_assistant/issues",
+  "requirements": ["groq>=0.4.0"],
+  "version": "0.1.0"
+}
