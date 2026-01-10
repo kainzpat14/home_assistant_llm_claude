@@ -15,16 +15,13 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = []
+PLATFORMS: list[Platform] = [Platform.CONVERSATION]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Voice Assistant LLM from a config entry."""
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {}
-
-    # TODO: Initialize LLM provider based on configuration
-    # TODO: Register conversation agent
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
