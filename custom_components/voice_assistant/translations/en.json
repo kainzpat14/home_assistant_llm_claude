@@ -2,23 +2,13 @@
   "config": {
     "step": {
       "user": {
-        "title": "Configure Voice Assistant LLM",
-        "description": "Set up the LLM provider for your voice assistant.",
+        "title": "Voice Assistant LLM",
+        "description": "Enter your Groq API key to get started. You can get one from https://console.groq.com/keys",
         "data": {
-          "provider": "LLM Provider",
-          "api_key": "API Key",
-          "model": "Model",
-          "llm_hass_api": "Enable Home Assistant Control",
-          "temperature": "Temperature",
-          "max_tokens": "Max Tokens"
+          "api_key": "API Key"
         },
         "data_description": {
-          "provider": "Select the LLM provider to use",
-          "api_key": "Your API key for the selected provider",
-          "model": "The model identifier to use",
-          "llm_hass_api": "Allow the LLM to control Home Assistant devices and services",
-          "temperature": "Controls response creativity (0.0-1.0)",
-          "max_tokens": "Maximum number of tokens in responses"
+          "api_key": "Your Groq API key"
         }
       }
     },
@@ -29,6 +19,32 @@
     },
     "abort": {
       "already_configured": "This integration is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Voice Assistant LLM Options",
+        "description": "Configure your voice assistant settings.",
+        "data": {
+          "provider": "LLM Provider",
+          "model": "Model",
+          "llm_hass_api": "Home Assistant API",
+          "temperature": "Temperature",
+          "max_tokens": "Max Tokens"
+        },
+        "data_description": {
+          "provider": "Select the LLM provider to use",
+          "model": "The model identifier to use",
+          "llm_hass_api": "Select which Home Assistant API to expose to the LLM for device control (optional)",
+          "temperature": "Controls response creativity (0.0-1.0)",
+          "max_tokens": "Maximum number of tokens in responses"
+        }
+      }
+    },
+    "error": {
+      "invalid_api_key": "Invalid API key",
+      "cannot_connect": "Failed to connect to the LLM provider"
     }
   }
 }

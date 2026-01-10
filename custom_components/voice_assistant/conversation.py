@@ -73,7 +73,7 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         if self._provider is None:
             self._provider = create_llm_provider(
                 provider=self._get_config(CONF_PROVIDER),
-                api_key=self._get_config(CONF_API_KEY),
+                api_key=self.entry.data[CONF_API_KEY],  # API key is always in data
                 model=self._get_config(CONF_MODEL),
                 temperature=self._get_config(CONF_TEMPERATURE, DEFAULT_TEMPERATURE),
                 max_tokens=self._get_config(CONF_MAX_TOKENS, DEFAULT_MAX_TOKENS),
@@ -89,7 +89,7 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
     def supported_features(self) -> conversation.ConversationEntityFeature:
         """Return supported features."""
         features = conversation.ConversationEntityFeature(0)
-        if self._get_config(CONF_LLM_HASS_API, True):
+        if self._get_config(CONF_LLM_HASS_API):
             features |= conversation.ConversationEntityFeature.CONTROL
         return features
 
@@ -115,7 +115,7 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         try:
             await chat_log.async_provide_llm_data(
                 user_input.as_llm_context(DOMAIN),
-                self._get_config(CONF_LLM_HASS_API, True),
+                self._get_config(CONF_LLM_HASS_API),
                 self._get_config(CONF_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT),
                 user_input.extra_system_prompt,
             )
