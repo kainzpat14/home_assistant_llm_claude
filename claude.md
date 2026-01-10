@@ -102,31 +102,59 @@ custom_components/
 
 ## Implementation Phases
 
-### Phase 1: Foundation (Current)
+### Phase 1: Foundation (Completed)
 - [x] Project structure setup
-- [ ] Basic integration skeleton
-- [ ] Configuration flow
+- [x] Basic integration skeleton (`__init__.py`)
+- [x] Configuration flow (`config_flow.py`)
+- [x] LLM provider abstraction layer (`llm/base.py`)
+- [x] HACS compatibility files
 
-### Phase 2: Core LLM Integration
-- [ ] LLM provider abstraction layer
-- [ ] Groq API implementation
-- [ ] Basic conversation agent
+### Phase 2: Core LLM Integration (In Progress)
+**See:** `docs/implementation/01-groq-provider.md`
+- [ ] Groq API implementation (`llm/groq.py`)
+- [ ] Provider factory (`llm/factory.py`)
+- [ ] API key validation in config flow
 
-### Phase 3: Home Assistant API Integration
-- [ ] HA API client wrapper
+### Phase 3: Conversation Agent
+**See:** `docs/implementation/02-conversation-agent.md`
+- [ ] Conversation agent entity (`conversation.py`)
+- [ ] Message history management
+- [ ] Integration with voice pipeline
+
+### Phase 4: Home Assistant API Integration
+**See:** `docs/implementation/03-ha-api-client.md`
+- [ ] HA API client wrapper (`ha_client/client.py`)
+- [ ] Tool definitions (`ha_client/tools.py`)
 - [ ] Entity discovery tools
 - [ ] Service execution tools
 - [ ] State query tools
+- [ ] Tool calling loop in conversation agent
 
-### Phase 4: Advanced Features
+### Phase 5: Advanced Features
 - [ ] Streaming response support
 - [ ] Dynamic tool loading
 - [ ] Conversation context management
 
-### Phase 5: Additional Providers
+### Phase 6: Additional Providers
 - [ ] OpenAI provider
 - [ ] Anthropic provider
 - [ ] Local LLM support (Ollama)
+
+## Implementation Plans
+
+Detailed implementation plans are available in `docs/implementation/`:
+
+| Order | File | Description |
+|-------|------|-------------|
+| 1 | `01-groq-provider.md` | Groq LLM provider with streaming support |
+| 2 | `02-conversation-agent.md` | Home Assistant conversation agent |
+| 3 | `03-ha-api-client.md` | HA API client and tool definitions |
+
+**Instructions for Sonnet:** Follow the implementation plans in order. Each plan contains:
+- Complete code for each file
+- Step-by-step implementation instructions
+- Testing guidance
+- Dependencies on previous steps
 
 ## Development Notes
 
