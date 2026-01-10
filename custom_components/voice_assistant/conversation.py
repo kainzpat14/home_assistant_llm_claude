@@ -23,8 +23,8 @@ from .const import (
     DEFAULT_SYSTEM_PROMPT,
     DEFAULT_TEMPERATURE,
 )
-from .ha_client import HomeAssistantClient, get_tools
 from .llm import create_llm_provider
+from .llm_tools import LLMToolManager
 
 if TYPE_CHECKING:
     from .llm.base import BaseLLMProvider
@@ -50,8 +50,9 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         self.entry = entry
         self._attr_unique_id = entry.entry_id
         self._provider: BaseLLMProvider | None = None
-        self._ha_client: HomeAssistantClient | None = None
+        self._tool_manager: LLMToolManager | None = None
         self._conversation_history: dict[str, list[dict[str, Any]]] = {}
+        self._current_tools: list[dict[str, Any]] = []  # Currently available tools
 
     @property
     def provider(self) -> BaseLLMProvider:
@@ -67,11 +68,11 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         return self._provider
 
     @property
-    def ha_client(self) -> HomeAssistantClient:
-        """Get or create the HA client."""
-        if self._ha_client is None:
-            self._ha_client = HomeAssistantClient(self.hass)
-        return self._ha_client
+    def tool_manager(self) -> LLMToolManager:
+        """Get or create the tool manager."""
+        if self._tool_manager is None:
+            self._tool_manager = LLMToolManager(self.hass)
+        return self._tool_manager
 
     @property
     def supported_languages(self) -> list[str] | Literal["*"]:
@@ -89,11 +90,13 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
 
         history = self._conversation_history[conversation_id]
         messages = self._build_messages(user_input.text, history)
-        tools = get_tools()
+
+        # Start with only query_tools - LLM will request more if needed
+        self._current_tools = self.tool_manager.get_initial_tools()
 
         try:
             # Process with potential tool calls
-            assistant_message = await self._process_with_tools(messages, tools)
+            assistant_message = await self._process_with_tools(messages)
 
             # Update history
             history.append({"role": "user", "content": user_input.text})
@@ -126,19 +129,18 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
     async def _process_with_tools(
         self,
         messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]],
     ) -> str:
-        """Process messages with tool calling support.
+        """Process messages with dynamic tool discovery.
 
         Args:
             messages: Conversation messages.
-            tools: Available tools.
 
         Returns:
             Final assistant response text.
         """
-        for _ in range(MAX_TOOL_ITERATIONS):
-            response = await self.provider.generate(messages, tools)
+        for iteration in range(MAX_TOOL_ITERATIONS):
+            # Generate with currently available tools
+            response = await self.provider.generate(messages, self._current_tools)
 
             # If no tool calls, return the content
             if "tool_calls" not in response or not response["tool_calls"]:
@@ -156,9 +158,19 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                 tool_name = tool_call["function"]["name"]
                 arguments = json.loads(tool_call["function"]["arguments"])
 
-                _LOGGER.debug("Executing tool %s with args: %s", tool_name, arguments)
+                _LOGGER.debug(
+                    "Iteration %d: Executing tool %s with args: %s",
+                    iteration + 1,
+                    tool_name,
+                    arguments,
+                )
 
-                result = await self.ha_client.execute_tool(tool_name, arguments)
+                # Handle query_tools specially
+                if tool_name == "query_tools":
+                    result = await self._handle_query_tools(arguments)
+                else:
+                    # Execute HA tool via tool manager
+                    result = await self.tool_manager.execute_tool(tool_name, arguments)
 
                 # Add tool result to messages
                 messages.append({
@@ -169,6 +181,52 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
 
         # If we hit max iterations, return last content or error
         return response.get("content", "I encountered an issue processing your request.")
+
+    async def _handle_query_tools(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Handle query_tools meta-tool call.
+
+        Args:
+            arguments: Tool arguments (may contain 'domain' filter).
+
+        Returns:
+            Result with list of available tools.
+        """
+        domain = arguments.get("domain")
+
+        try:
+            # Query Home Assistant for available tools
+            ha_tools = await self.tool_manager.query_tools(domain)
+
+            # Add queried tools to current available tools (excluding duplicates)
+            existing_names = {t["function"]["name"] for t in self._current_tools}
+            for tool in ha_tools:
+                if tool["function"]["name"] not in existing_names:
+                    self._current_tools.append(tool)
+
+            _LOGGER.info(
+                "Queried %d tools%s, now have %d total tools available",
+                len(ha_tools),
+                f" for domain '{domain}'" if domain else "",
+                len(self._current_tools),
+            )
+
+            # Return summary to LLM
+            tool_names = [t["function"]["name"] for t in ha_tools]
+            return {
+                "success": True,
+                "result": {
+                    "message": f"Found {len(ha_tools)} tools" + (f" for domain '{domain}'" if domain else ""),
+                    "tools": tool_names,
+                    "note": "These tools are now available for you to use. You can call them directly.",
+                },
+            }
+
+        except Exception as err:
+            _LOGGER.error("Error handling query_tools: %s", err)
+            return {
+                "success": False,
+                "error": f"Failed to query tools: {err}",
+            }
 
     def _build_messages(
         self, user_text: str, history: list[dict[str, Any]]
