@@ -9,6 +9,7 @@ CONF_MODEL = "model"
 CONF_BASE_URL = "base_url"
 CONF_TEMPERATURE = "temperature"
 CONF_MAX_TOKENS = "max_tokens"
+CONF_LLM_HASS_API = "llm_hass_api"
 
 # Default values
 DEFAULT_TEMPERATURE = 0.7

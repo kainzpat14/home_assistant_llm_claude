@@ -8,6 +8,7 @@
           "provider": "LLM Provider",
           "api_key": "API Key",
           "model": "Model",
+          "llm_hass_api": "Enable Home Assistant Control",
           "temperature": "Temperature",
           "max_tokens": "Max Tokens"
         },
@@ -15,6 +16,7 @@
           "provider": "Select the LLM provider to use",
           "api_key": "Your API key for the selected provider",
           "model": "The model identifier to use",
+          "llm_hass_api": "Allow the LLM to control Home Assistant devices and services",
           "temperature": "Controls response creativity (0.0-1.0)",
           "max_tokens": "Maximum number of tokens in responses"
         }

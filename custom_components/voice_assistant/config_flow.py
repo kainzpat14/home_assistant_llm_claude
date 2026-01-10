@@ -11,6 +11,7 @@ from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_API_KEY
 
 from .const import (
+    CONF_LLM_HASS_API,
     CONF_MAX_TOKENS,
     CONF_MODEL,
     CONF_PROVIDER,
@@ -70,6 +71,7 @@ class VoiceAssistantConfigFlow(ConfigFlow, domain=DOMAIN):
                     vol.Required(
                         CONF_MODEL, default=DEFAULT_MODELS[PROVIDER_GROQ]
                     ): str,
+                    vol.Optional(CONF_LLM_HASS_API, default=True): bool,
                     vol.Optional(
                         CONF_TEMPERATURE, default=DEFAULT_TEMPERATURE
                     ): vol.Coerce(float),

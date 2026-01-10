@@ -14,6 +14,7 @@ from homeassistant.util import ulid
 
 from .const import (
     CONF_API_KEY,
+    CONF_LLM_HASS_API,
     CONF_MAX_TOKENS,
     CONF_MODEL,
     CONF_PROVIDER,
@@ -22,6 +23,7 @@ from .const import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_SYSTEM_PROMPT,
     DEFAULT_TEMPERATURE,
+    DOMAIN,
 )
 from .llm import create_llm_provider
 from .llm_tools import LLMToolManager
@@ -71,6 +73,14 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         """Return supported languages."""
         return "*"
 
+    @property
+    def supported_features(self) -> conversation.ConversationEntityFeature:
+        """Return supported features."""
+        features = conversation.ConversationEntityFeature(0)
+        if self.entry.data.get(CONF_LLM_HASS_API, True):
+            features |= conversation.ConversationEntityFeature.CONTROL
+        return features
+
     async def _async_handle_message(
         self,
         user_input: conversation.ConversationInput,
@@ -88,6 +98,26 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
             The conversation result.
         """
         conversation_id = user_input.conversation_id or ulid.ulid_now()
+
+        # Provide LLM data to chat_log to set up llm_api
+        try:
+            await chat_log.async_provide_llm_data(
+                user_input.as_llm_context(DOMAIN),
+                self.entry.data.get(CONF_LLM_HASS_API, True),
+                self.entry.data.get(CONF_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT),
+                user_input.extra_system_prompt,
+            )
+        except conversation.ConverseError as err:
+            _LOGGER.error("Error providing LLM data: %s", err)
+            intent_response = intent.IntentResponse(language=user_input.language)
+            intent_response.async_set_error(
+                intent.IntentResponseErrorCode.UNKNOWN,
+                str(err),
+            )
+            return conversation.ConversationResult(
+                response=intent_response,
+                conversation_id=conversation_id,
+            )
 
         # Create tool manager with access to chat_log's llm_api
         tool_manager = LLMToolManager(chat_log)
@@ -240,7 +270,7 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
     def _build_messages(
         self, user_text: str, chat_log: ChatLog
     ) -> list[dict[str, Any]]:
-        """Build the messages list for the LLM.
+        """Build the messages list for the LLM from chat_log.
 
         Args:
             user_text: The current user message.
@@ -249,24 +279,23 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         Returns:
             List of messages in OpenAI format.
         """
-        system_prompt = self.entry.data.get(CONF_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT)
+        messages: list[dict[str, Any]] = []
 
-        messages: list[dict[str, Any]] = [
-            {"role": "system", "content": system_prompt},
-        ]
-
-        # Add history from chat_log if available
+        # Convert chat_log content to OpenAI message format
+        # chat_log already has system prompt from async_provide_llm_data
         if hasattr(chat_log, "content") and chat_log.content:
             for content in chat_log.content:
-                # Convert chat_log content to OpenAI message format
                 content_type = type(content).__name__
-                if content_type == "UserContent":
+                if content_type == "SystemContent":
+                    messages.append({"role": "system", "content": content.content})
+                elif content_type == "UserContent":
                     messages.append({"role": "user", "content": content.content})
                 elif content_type == "AssistantContent":
                     messages.append({"role": "assistant", "content": content.content})
 
-        # Add current user message
-        messages.append({"role": "user", "content": user_text})
+        # Add current user message if not already in chat_log
+        if not messages or messages[-1].get("content") != user_text:
+            messages.append({"role": "user", "content": user_text})
 
         return messages
 
