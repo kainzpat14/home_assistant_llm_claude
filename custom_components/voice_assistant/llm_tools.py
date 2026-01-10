@@ -5,10 +5,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from homeassistant.components import llm
-
 if TYPE_CHECKING:
-    from homeassistant.core import HomeAssistant
+    from homeassistant.components.conversation import ChatLog
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,37 +31,23 @@ QUERY_TOOLS_DEFINITION = {
 
 
 class LLMToolManager:
-    """Manager for dynamic LLM tool discovery."""
+    """Manager for dynamic LLM tool discovery using chat_log."""
 
-    def __init__(self, hass: HomeAssistant) -> None:
-        """Initialize the tool manager."""
-        self.hass = hass
-        self._llm_api: llm.APIInstance | None = None
-        self._cached_tools: dict[str, Any] | None = None
+    def __init__(self, chat_log: ChatLog) -> None:
+        """Initialize the tool manager with chat_log.
 
-    async def get_llm_api(self) -> llm.APIInstance:
-        """Get or create the LLM API instance."""
-        if self._llm_api is None:
-            try:
-                self._llm_api = await llm.async_get_api(
-                    self.hass,
-                    "voice_assistant",
-                    llm.LLMContext(
-                        platform="voice_assistant",
-                        context=None,
-                        user_prompt=None,
-                        language=None,
-                        assistant=None,
-                        device_id=None,
-                    ),
-                )
-            except Exception as err:
-                _LOGGER.error("Failed to get LLM API: %s", err)
-                raise
-        return self._llm_api
+        Args:
+            chat_log: The ChatLog instance containing the llm_api.
+        """
+        self.chat_log = chat_log
 
-    async def query_tools(self, domain: str | None = None) -> list[dict[str, Any]]:
-        """Query available Home Assistant tools.
+    @property
+    def llm_api(self):
+        """Get the LLM API from the chat_log."""
+        return self.chat_log.llm_api
+
+    def query_tools(self, domain: str | None = None) -> list[dict[str, Any]]:
+        """Query available Home Assistant tools from the llm_api.
 
         Args:
             domain: Optional domain filter (e.g., 'light', 'climate').
@@ -71,18 +55,24 @@ class LLMToolManager:
         Returns:
             List of tool definitions in OpenAI function format.
         """
-        try:
-            api = await self.get_llm_api()
+        if self.llm_api is None:
+            _LOGGER.warning("No LLM API available in chat_log")
+            return []
 
-            # Get all available tools from HA's LLM API
-            tools = await api.async_get_tools()
+        try:
+            # Get tools from the llm_api
+            tools = self.llm_api.tools
 
             # Convert HA tools to OpenAI function format
             formatted_tools = []
             for tool in tools:
                 # Filter by domain if specified
-                if domain and hasattr(tool, "domain") and tool.domain != domain:
-                    continue
+                tool_name = getattr(tool, "name", "")
+                if domain and not tool_name.startswith(f"{domain}.") and not tool_name.startswith(domain):
+                    # Also check if the tool description mentions the domain
+                    tool_desc = getattr(tool, "description", "").lower()
+                    if domain.lower() not in tool_desc:
+                        continue
 
                 # Convert to OpenAI format
                 formatted_tool = self._convert_tool_to_openai_format(tool)
@@ -101,7 +91,7 @@ class LLMToolManager:
             _LOGGER.error("Error querying tools: %s", err)
             return []
 
-    def _convert_tool_to_openai_format(self, tool: llm.Tool) -> dict[str, Any] | None:
+    def _convert_tool_to_openai_format(self, tool) -> dict[str, Any] | None:
         """Convert HA tool to OpenAI function format.
 
         Args:
@@ -111,25 +101,30 @@ class LLMToolManager:
             Tool in OpenAI function calling format, or None if conversion fails.
         """
         try:
-            # Get tool schema
-            schema = tool.parameters
+            # Get tool attributes
+            name = getattr(tool, "name", None)
+            description = getattr(tool, "description", None)
+            parameters = getattr(tool, "parameters", None)
+
+            if not name:
+                return None
 
             return {
                 "type": "function",
                 "function": {
-                    "name": tool.name,
-                    "description": tool.description or f"Execute {tool.name}",
-                    "parameters": schema if schema else {"type": "object", "properties": {}, "required": []},
+                    "name": name,
+                    "description": description or f"Execute {name}",
+                    "parameters": parameters if parameters else {"type": "object", "properties": {}, "required": []},
                 },
             }
         except Exception as err:
-            _LOGGER.warning("Failed to convert tool %s: %s", getattr(tool, "name", "unknown"), err)
+            _LOGGER.warning("Failed to convert tool: %s", err)
             return None
 
     async def execute_tool(
         self, tool_name: str, arguments: dict[str, Any]
     ) -> dict[str, Any]:
-        """Execute a Home Assistant tool.
+        """Execute a Home Assistant tool via the llm_api.
 
         Args:
             tool_name: Name of the tool to execute.
@@ -138,18 +133,15 @@ class LLMToolManager:
         Returns:
             Execution result.
         """
+        if self.llm_api is None:
+            return {"success": False, "error": "No LLM API available"}
+
         try:
-            api = await self.get_llm_api()
+            # Create tool input and execute via llm_api
+            from homeassistant.components.conversation.models import ToolInput
 
-            # Find the tool
-            tools = await api.async_get_tools()
-            tool = next((t for t in tools if t.name == tool_name), None)
-
-            if not tool:
-                return {"success": False, "error": f"Tool '{tool_name}' not found"}
-
-            # Execute the tool
-            result = await tool.async_call(self.hass, arguments)
+            tool_input = ToolInput(tool_name=tool_name, tool_args=arguments)
+            result = await self.llm_api.async_call_tool(tool_input)
 
             return {"success": True, "result": result}
 
@@ -157,7 +149,8 @@ class LLMToolManager:
             _LOGGER.error("Error executing tool %s: %s", tool_name, err)
             return {"success": False, "error": str(err)}
 
-    def get_initial_tools(self) -> list[dict[str, Any]]:
+    @staticmethod
+    def get_initial_tools() -> list[dict[str, Any]]:
         """Get initial tools (just query_tools meta-tool).
 
         Returns:

@@ -27,6 +27,8 @@ from .llm import create_llm_provider
 from .llm_tools import LLMToolManager
 
 if TYPE_CHECKING:
+    from homeassistant.components.conversation import ChatLog
+
     from .llm.base import BaseLLMProvider
 
 _LOGGER = logging.getLogger(__name__)
@@ -50,9 +52,6 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         self.entry = entry
         self._attr_unique_id = entry.entry_id
         self._provider: BaseLLMProvider | None = None
-        self._tool_manager: LLMToolManager | None = None
-        self._conversation_history: dict[str, list[dict[str, Any]]] = {}
-        self._current_tools: list[dict[str, Any]] = []  # Currently available tools
 
     @property
     def provider(self) -> BaseLLMProvider:
@@ -68,43 +67,42 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         return self._provider
 
     @property
-    def tool_manager(self) -> LLMToolManager:
-        """Get or create the tool manager."""
-        if self._tool_manager is None:
-            self._tool_manager = LLMToolManager(self.hass)
-        return self._tool_manager
-
-    @property
     def supported_languages(self) -> list[str] | Literal["*"]:
         """Return supported languages."""
         return "*"
 
-    async def async_process(
-        self, user_input: conversation.ConversationInput
+    async def _async_handle_message(
+        self,
+        user_input: conversation.ConversationInput,
+        chat_log: ChatLog,
     ) -> conversation.ConversationResult:
-        """Process a user input and return a response."""
+        """Handle a message from the user.
+
+        This method is called by async_process after chat_log is set up.
+
+        Args:
+            user_input: The user's input.
+            chat_log: The chat log containing llm_api and conversation history.
+
+        Returns:
+            The conversation result.
+        """
         conversation_id = user_input.conversation_id or ulid.ulid_now()
 
-        if conversation_id not in self._conversation_history:
-            self._conversation_history[conversation_id] = []
-
-        history = self._conversation_history[conversation_id]
-        messages = self._build_messages(user_input.text, history)
+        # Create tool manager with access to chat_log's llm_api
+        tool_manager = LLMToolManager(chat_log)
 
         # Start with only query_tools - LLM will request more if needed
-        self._current_tools = self.tool_manager.get_initial_tools()
+        current_tools = LLMToolManager.get_initial_tools()
+
+        # Build messages from chat_log content and add system prompt
+        messages = self._build_messages(user_input.text, chat_log)
 
         try:
             # Process with potential tool calls
-            assistant_message = await self._process_with_tools(messages)
-
-            # Update history
-            history.append({"role": "user", "content": user_input.text})
-            history.append({"role": "assistant", "content": assistant_message})
-
-            if len(history) > 20:
-                history = history[-20:]
-                self._conversation_history[conversation_id] = history
+            assistant_message = await self._process_with_tools(
+                messages, current_tools, tool_manager
+            )
 
             intent_response = intent.IntentResponse(language=user_input.language)
             intent_response.async_set_speech(assistant_message)
@@ -129,18 +127,22 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
     async def _process_with_tools(
         self,
         messages: list[dict[str, Any]],
+        current_tools: list[dict[str, Any]],
+        tool_manager: LLMToolManager,
     ) -> str:
         """Process messages with dynamic tool discovery.
 
         Args:
             messages: Conversation messages.
+            current_tools: Currently available tools.
+            tool_manager: The tool manager for discovering and executing tools.
 
         Returns:
             Final assistant response text.
         """
         for iteration in range(MAX_TOOL_ITERATIONS):
             # Generate with currently available tools
-            response = await self.provider.generate(messages, self._current_tools)
+            response = await self.provider.generate(messages, current_tools)
 
             # If no tool calls, return the content
             if "tool_calls" not in response or not response["tool_calls"]:
@@ -167,10 +169,10 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
 
                 # Handle query_tools specially
                 if tool_name == "query_tools":
-                    result = await self._handle_query_tools(arguments)
+                    result = self._handle_query_tools(arguments, current_tools, tool_manager)
                 else:
                     # Execute HA tool via tool manager
-                    result = await self.tool_manager.execute_tool(tool_name, arguments)
+                    result = await tool_manager.execute_tool(tool_name, arguments)
 
                 # Add tool result to messages
                 messages.append({
@@ -182,11 +184,18 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         # If we hit max iterations, return last content or error
         return response.get("content", "I encountered an issue processing your request.")
 
-    async def _handle_query_tools(self, arguments: dict[str, Any]) -> dict[str, Any]:
+    def _handle_query_tools(
+        self,
+        arguments: dict[str, Any],
+        current_tools: list[dict[str, Any]],
+        tool_manager: LLMToolManager,
+    ) -> dict[str, Any]:
         """Handle query_tools meta-tool call.
 
         Args:
             arguments: Tool arguments (may contain 'domain' filter).
+            current_tools: List to update with discovered tools.
+            tool_manager: The tool manager.
 
         Returns:
             Result with list of available tools.
@@ -195,19 +204,19 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
 
         try:
             # Query Home Assistant for available tools
-            ha_tools = await self.tool_manager.query_tools(domain)
+            ha_tools = tool_manager.query_tools(domain)
 
             # Add queried tools to current available tools (excluding duplicates)
-            existing_names = {t["function"]["name"] for t in self._current_tools}
+            existing_names = {t["function"]["name"] for t in current_tools}
             for tool in ha_tools:
                 if tool["function"]["name"] not in existing_names:
-                    self._current_tools.append(tool)
+                    current_tools.append(tool)
 
             _LOGGER.info(
                 "Queried %d tools%s, now have %d total tools available",
                 len(ha_tools),
                 f" for domain '{domain}'" if domain else "",
-                len(self._current_tools),
+                len(current_tools),
             )
 
             # Return summary to LLM
@@ -229,15 +238,34 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
             }
 
     def _build_messages(
-        self, user_text: str, history: list[dict[str, Any]]
+        self, user_text: str, chat_log: ChatLog
     ) -> list[dict[str, Any]]:
-        """Build the messages list for the LLM."""
+        """Build the messages list for the LLM.
+
+        Args:
+            user_text: The current user message.
+            chat_log: The chat log with conversation history.
+
+        Returns:
+            List of messages in OpenAI format.
+        """
         system_prompt = self.entry.data.get(CONF_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT)
 
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
         ]
-        messages.extend(history)
+
+        # Add history from chat_log if available
+        if hasattr(chat_log, "content") and chat_log.content:
+            for content in chat_log.content:
+                # Convert chat_log content to OpenAI message format
+                content_type = type(content).__name__
+                if content_type == "UserContent":
+                    messages.append({"role": "user", "content": content.content})
+                elif content_type == "AssistantContent":
+                    messages.append({"role": "assistant", "content": content.content})
+
+        # Add current user message
         messages.append({"role": "user", "content": user_text})
 
         return messages
