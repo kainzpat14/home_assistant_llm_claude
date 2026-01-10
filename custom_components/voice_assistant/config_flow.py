@@ -46,7 +46,7 @@ class VoiceAssistantConfigFlow(ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(config_entry):
         """Get the options flow for this handler."""
-        return VoiceAssistantOptionsFlow(config_entry)
+        return VoiceAssistantOptionsFlow()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
