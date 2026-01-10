@@ -4,9 +4,10 @@
   "codeowners": [],
   "config_flow": true,
   "dependencies": ["conversation"],
-  "documentation": "https://github.com/your-username/voice_assistant",
+  "documentation": "https://github.com/kainzpat14/home_assistant_llm_claude",
   "iot_class": "cloud_polling",
-  "issue_tracker": "https://github.com/your-username/voice_assistant/issues",
+  "issue_tracker": "https://github.com/kainzpat14/home_assistant_llm_claude/issues",
+  "loggers": ["custom_components.voice_assistant"],
   "requirements": ["groq>=0.4.0"],
   "version": "0.1.0"
 }
