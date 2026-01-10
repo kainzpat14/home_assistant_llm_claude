@@ -22,6 +22,7 @@ from .const import (
     PROVIDER_GROQ,
     SUPPORTED_PROVIDERS,
 )
+from .llm import create_llm_provider
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -38,11 +39,25 @@ class VoiceAssistantConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            # TODO: Validate API key by making a test request
-            return self.async_create_entry(
-                title=f"Voice Assistant ({user_input[CONF_PROVIDER]})",
-                data=user_input,
-            )
+            # Validate API key
+            try:
+                provider = create_llm_provider(
+                    provider=user_input[CONF_PROVIDER],
+                    api_key=user_input[CONF_API_KEY],
+                    model=user_input[CONF_MODEL],
+                    temperature=user_input.get(CONF_TEMPERATURE, DEFAULT_TEMPERATURE),
+                    max_tokens=user_input.get(CONF_MAX_TOKENS, DEFAULT_MAX_TOKENS),
+                )
+                if not await provider.validate_api_key():
+                    errors["base"] = "invalid_api_key"
+            except Exception:
+                errors["base"] = "cannot_connect"
+
+            if not errors:
+                return self.async_create_entry(
+                    title=f"Voice Assistant ({user_input[CONF_PROVIDER]})",
+                    data=user_input,
+                )
 
         return self.async_show_form(
             step_id="user",

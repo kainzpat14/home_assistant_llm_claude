@@ -156,6 +156,13 @@ Detailed implementation plans are available in `docs/implementation/`:
 - Testing guidance
 - Dependencies on previous steps
 
+**Note for Future Implementation Plans:** When creating new implementation plans, provide only:
+- High-level approach and architecture decisions
+- Key implementation pointers and considerations
+- File structure and what each file should do
+- Important gotchas or Home Assistant-specific patterns
+- DO NOT include complete code - let Sonnet implement based on patterns and pointers
+
 ## Development Notes
 
 ### Home Assistant Integration Requirements
