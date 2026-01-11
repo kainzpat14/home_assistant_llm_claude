@@ -28,3 +28,7 @@ Needs testing to confirm tool calls now appear in the UI.
 ## 4. System Prompt Override Needed
 **Status:** Open
 **Description:** Home Assistant provides a system prompt that is too long. We need to ignore it and provide our own system prompt instead.
+
+## 5. LLM Not Receiving Conversation History
+**Status:** Open
+**Description:** The LLM does not seem to be provided with the conversation history from previous turns, causing it to lose context between messages in a conversation.
