@@ -115,8 +115,19 @@ class LLMToolManager:
             # Convert parameters using voluptuous_openapi to handle Schema objects
             # This converts Home Assistant's voluptuous schemas to JSON-serializable dicts
             if parameters:
+                _LOGGER.debug(
+                    "Original parameters type for tool %s: %s",
+                    name,
+                    type(parameters).__name__,
+                )
                 custom_serializer = getattr(self.llm_api, "custom_serializer", None)
-                parameters = convert(parameters, custom_serializer=custom_serializer)
+                converted_parameters = convert(parameters, custom_serializer=custom_serializer)
+                _LOGGER.debug(
+                    "Converted schema for tool %s: %s",
+                    name,
+                    converted_parameters,
+                )
+                parameters = converted_parameters
             else:
                 parameters = {"type": "object", "properties": {}, "required": []}
 

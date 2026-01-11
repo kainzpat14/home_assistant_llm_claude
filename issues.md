@@ -32,3 +32,10 @@ Needs testing to confirm tool calls now appear in the UI.
 ## 5. LLM Not Receiving Conversation History
 **Status:** Open
 **Description:** The LLM does not seem to be provided with the conversation history from previous turns, causing it to lose context between messages in a conversation.
+
+## 6. Tool Schema Validation Error
+**Status:** Open
+**Description:** Groq API returns validation error when LLM tries to call Home Assistant tools.
+**Error:** `Tool call validation failed: parameters for tool HassLightSet did not match schema: errors: ['/domain': expected array, but got string]`
+**Root Cause:** The tool schema conversion from Home Assistant's voluptuous schema to OpenAPI format may not be handling all field types correctly. The LLM is passing `domain` as a string (e.g., "light") but the converted schema says it should be an array.
+**Failed Example:** `{"name": "HassLightSet", "arguments": {"name":"Licht Wohnzimmer","domain":"light","brightness":100}}`
