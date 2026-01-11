@@ -200,15 +200,9 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                 tool_args = {}
 
             tool_input = llm.ToolInput(
+                id=tool_call["id"],
                 tool_name=tool_name,
                 tool_args=tool_args,
-                platform=DOMAIN,
-                context=user_input.context,
-                user_prompt=user_input.text,
-                language=user_input.language,
-                assistant="conversation",
-                device_id=user_input.device_id,
-                id=tool_call["id"],
             )
             tool_inputs.append(tool_input)
             _LOGGER.debug(
