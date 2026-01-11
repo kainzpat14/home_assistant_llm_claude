@@ -26,15 +26,16 @@
 Tool calls now appear in the UI correctly.
 
 ## 4. System Prompt Override Needed
-**Status:** 🔧 Fix Applied (Pending Testing)
+**Status:** ✅ Resolved
 **Description:** Home Assistant provides a system prompt that is too long. We need to ignore it and provide our own system prompt instead.
-**Solution:** Modified `_build_messages()` to:
-- Accept the system prompt from integration config as a parameter
+**Solution:** Modified the integration to completely ignore Home Assistant's system prompts:
+- Modified `_build_messages()` to accept system prompt from integration config as a parameter
 - Always use our configured system prompt (from `CONF_SYSTEM_PROMPT` or `DEFAULT_SYSTEM_PROMPT`)
-- Skip/ignore `SystemContent` from chat_log (Home Assistant's system prompt)
+- Skip/ignore `SystemContent` from chat_log when building LLM messages
+- Pass `None` as the 4th parameter to `async_provide_llm_data()` to ignore `user_input.extra_system_prompt`
 - Still preserve conversation history (user and assistant messages from chat_log)
-- Added debug logging to show when HA's system prompt is being skipped
-This gives the integration full control over the system prompt regardless of what Home Assistant provides.
+- Added debug logging to show system prompt usage
+The LLM now uses only the integration's configured system prompt, giving full control over prompting behavior.
 
 ## 5. LLM Not Receiving Conversation History
 **Status:** Open
