@@ -122,8 +122,9 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                 user_input.as_llm_context(DOMAIN),
                 self._get_config(CONF_LLM_HASS_API),
                 self._get_config(CONF_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT),
-                user_input.extra_system_prompt,
+                None,  # Ignore HA's extra_system_prompt - use only our configured prompt
             )
+            _LOGGER.debug("Provided LLM data with our system prompt, ignoring HA's extra prompt")
         except conversation.ConverseError as err:
             _LOGGER.error("Error providing LLM data: %s", err)
             intent_response = intent.IntentResponse(language=user_input.language)
