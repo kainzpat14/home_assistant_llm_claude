@@ -266,19 +266,47 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                 "tool_calls": tool_calls,
             })
 
-            # Handle query_tools locally (not in chat_log)
-            for tool_call in query_tools_calls:
-                arguments = json.loads(tool_call["function"]["arguments"])
-                _LOGGER.debug("Handling query_tools with args: %s", arguments)
+            # Handle query_tools locally (but add to chat_log for visibility)
+            if query_tools_calls:
+                _LOGGER.info("Processing %d query_tools call(s)", len(query_tools_calls))
 
-                result = self._handle_query_tools(arguments, current_tools, tool_manager)
+                # Convert to ToolInput objects for chat_log
+                query_tool_inputs = self._convert_tool_calls_to_inputs(query_tools_calls, user_input)
 
-                # Add result to messages for LLM
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call["id"],
-                    "content": json.dumps(result),
-                })
+                # Create AssistantContent with query_tools calls
+                query_assistant_content = AssistantContent(
+                    agent_id=DOMAIN,
+                    content=None,  # No content, just tool calls
+                    tool_calls=query_tool_inputs,
+                )
+
+                _LOGGER.debug("Adding query_tools to chat_log for visibility")
+
+                # Add to chat_log without executing (we'll execute manually)
+                chat_log.async_add_assistant_content_without_tools(query_assistant_content)
+
+                # Execute query_tools manually and add results
+                for tool_call in query_tools_calls:
+                    arguments = json.loads(tool_call["function"]["arguments"])
+                    _LOGGER.debug("Handling query_tools with args: %s", arguments)
+
+                    result = self._handle_query_tools(arguments, current_tools, tool_manager)
+
+                    # Add result to messages for LLM
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "content": json.dumps(result),
+                    })
+
+                    # Add result to chat_log for visibility
+                    tool_result_content = ToolResultContent(
+                        agent_id=DOMAIN,
+                        tool_call_id=tool_call["id"],
+                        tool_name="query_tools",
+                        tool_result=result,
+                    )
+                    chat_log.async_add_assistant_content_without_tools(tool_result_content)
 
             # Handle real HA tools through chat_log
             if ha_tool_calls:
