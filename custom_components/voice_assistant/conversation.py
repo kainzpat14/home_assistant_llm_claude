@@ -156,6 +156,14 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                 messages, current_tools, tool_manager, chat_log, user_input
             )
 
+            # Add the final assistant response to chat_log so it's available in future turns
+            final_assistant_content = AssistantContent(
+                agent_id=DOMAIN,
+                content=assistant_message,
+            )
+            chat_log.async_add_assistant_content_without_tools(final_assistant_content)
+            _LOGGER.debug("Added final assistant response to chat_log for conversation history")
+
             intent_response = intent.IntentResponse(language=user_input.language)
             intent_response.async_set_speech(assistant_message)
 
