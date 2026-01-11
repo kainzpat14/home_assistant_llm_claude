@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from .llm.base import BaseLLMProvider
 
 _LOGGER = logging.getLogger(__name__)
+_LOGGER.setLevel(logging.DEBUG)
 
 MAX_TOOL_ITERATIONS = 5  # Prevent infinite tool loops
 

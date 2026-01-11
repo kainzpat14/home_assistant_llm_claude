@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from homeassistant.components.conversation import ChatLog
 
 _LOGGER = logging.getLogger(__name__)
+_LOGGER.setLevel(logging.DEBUG)
 
 # The meta-tool that allows LLM to discover available tools
 QUERY_TOOLS_DEFINITION = {
