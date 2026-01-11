@@ -266,29 +266,12 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                 "tool_calls": tool_calls,
             })
 
-            # Handle query_tools locally (but add to chat_log for visibility)
+            # Handle query_tools locally (not in chat_log - it's an internal meta-tool)
             if query_tools_calls:
-                _LOGGER.info("Processing %d query_tools call(s)", len(query_tools_calls))
-
-                # Convert to ToolInput objects for chat_log
-                query_tool_inputs = self._convert_tool_calls_to_inputs(query_tools_calls, user_input)
-
-                # Create AssistantContent with query_tools calls
-                query_assistant_content = AssistantContent(
-                    agent_id=DOMAIN,
-                    content=None,  # No content, just tool calls
-                    tool_calls=query_tool_inputs,
-                )
-
-                _LOGGER.debug("Adding query_tools to chat_log for visibility")
-
-                # Add to chat_log without executing (we'll execute manually)
-                chat_log.async_add_assistant_content_without_tools(query_assistant_content)
-
-                # Execute query_tools manually and add results
+                query_tools_summary = []
                 for tool_call in query_tools_calls:
                     arguments = json.loads(tool_call["function"]["arguments"])
-                    _LOGGER.debug("Handling query_tools with args: %s", arguments)
+                    _LOGGER.info("Handling query_tools with args: %s", arguments)
 
                     result = self._handle_query_tools(arguments, current_tools, tool_manager)
 
@@ -299,14 +282,22 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                         "content": json.dumps(result),
                     })
 
-                    # Add result to chat_log for visibility
-                    tool_result_content = ToolResultContent(
+                    # Build summary for chat_log
+                    domain_filter = arguments.get("domain", "all domains")
+                    if result.get("success"):
+                        tools_found = result.get("result", {}).get("tools", [])
+                        query_tools_summary.append(
+                            f"Discovered {len(tools_found)} tools for {domain_filter}"
+                        )
+
+                # Add a message to chat_log describing what query_tools did
+                if query_tools_summary:
+                    summary_content = AssistantContent(
                         agent_id=DOMAIN,
-                        tool_call_id=tool_call["id"],
-                        tool_name="query_tools",
-                        tool_result=result,
+                        content="\n".join(query_tools_summary),
                     )
-                    chat_log.async_add_assistant_content_without_tools(tool_result_content)
+                    chat_log.async_add_assistant_content_without_tools(summary_content)
+                    _LOGGER.debug("Added query_tools summary to chat_log")
 
             # Handle real HA tools through chat_log
             if ha_tool_calls:
