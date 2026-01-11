@@ -117,6 +117,11 @@ class LLMToolManager:
             if parameters:
                 custom_serializer = getattr(self.llm_api, "custom_serializer", None)
                 parameters = convert(parameters, custom_serializer=custom_serializer)
+                _LOGGER.debug(
+                    "Converted schema for tool %s: %s",
+                    name,
+                    parameters,
+                )
             else:
                 parameters = {"type": "object", "properties": {}, "required": []}
 
