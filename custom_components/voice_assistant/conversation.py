@@ -104,32 +104,30 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
     async def async_process(
         self,
         user_input: conversation.ConversationInput,
-    ) -> conversation.ConversationResult:
+    ) -> conversation.ConversationResult | AsyncIterator[conversation.ConversationResultDelta]:
         """Process user input - entry point from HA.
 
         Args:
             user_input: The user's conversation input.
 
         Returns:
-            The conversation result.
+            The conversation result (or iterator for streaming).
         """
-        # Check if streaming is enabled and supported
+        # Check if streaming is enabled
         if self._get_config(CONF_ENABLE_STREAMING, DEFAULT_ENABLE_STREAMING):
             _LOGGER.debug("Streaming enabled, using streaming handler")
-            # Use async_get_result_from_chat_log for streaming
-            return await conversation.async_get_result_from_chat_log(
-                self.hass,
-                user_input,
-                self._async_handle_message_streaming,
-            )
+            # For streaming, we need to return an async iterator
+            # Create chat_log and yield results
+            async def streaming_wrapper():
+                chat_log = conversation.ChatLog(self.hass)
+                async for delta in self._async_handle_message_streaming(user_input, chat_log):
+                    yield delta
+            return streaming_wrapper()
         else:
             _LOGGER.debug("Streaming disabled, using non-streaming handler")
-            # Use default non-streaming path
-            return await conversation.async_get_result_from_chat_log(
-                self.hass,
-                user_input,
-                self._async_handle_message,
-            )
+            # For non-streaming, use the standard path
+            chat_log = conversation.ChatLog(self.hass)
+            return await self._async_handle_message(user_input, chat_log)
 
     async def _async_handle_message(
         self,
