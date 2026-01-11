@@ -38,10 +38,10 @@ Tool calls now appear in the UI correctly.
 The LLM now uses only the integration's configured system prompt, giving full control over prompting behavior.
 
 ## 5. LLM Not Receiving Conversation History
-**Status:** 🔧 Fix Applied (Pending Testing)
+**Status:** ✅ Resolved
 **Description:** The LLM does not seem to be provided with the conversation history from previous turns, causing it to lose context between messages in a conversation.
 **Root Cause:** The integration was adding tool calls to chat_log but NOT the final assistant response. After processing and returning the response, it was never saved to chat_log, so subsequent turns had no memory of previous assistant responses.
-**Solution:** After getting the final assistant_message from `_process_with_tools()`, create an `AssistantContent` object with the response and add it to chat_log using `async_add_assistant_content_without_tools()`. This ensures the full conversation history (user messages AND assistant responses) is preserved across turns.
+**Solution:** After getting the final assistant_message from `_process_with_tools()`, create an `AssistantContent` object with the response and add it to chat_log using `async_add_assistant_content_without_tools()`. This ensures the full conversation history (user messages AND assistant responses) is preserved across turns. The LLM now maintains context across multiple conversation turns.
 
 ## 6. Tool Schema Validation Error
 **Status:** ✅ Resolved
