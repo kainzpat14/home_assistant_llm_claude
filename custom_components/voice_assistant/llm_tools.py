@@ -122,6 +122,20 @@ class LLMToolManager:
                 )
                 custom_serializer = getattr(self.llm_api, "custom_serializer", None)
                 converted_parameters = convert(parameters, custom_serializer=custom_serializer)
+
+                # Post-process to add helpful descriptions for array fields
+                # This helps the LLM understand when to use array syntax
+                if "properties" in converted_parameters:
+                    for prop_name, prop_schema in converted_parameters["properties"].items():
+                        if prop_schema.get("type") == "array" and "description" not in prop_schema:
+                            # Add description to array fields that don't have one
+                            prop_schema["description"] = f"Array of {prop_name} values (use JSON array syntax: [{prop_name}1, {prop_name}2])"
+                            _LOGGER.debug(
+                                "Added array description for %s.%s",
+                                name,
+                                prop_name,
+                            )
+
                 _LOGGER.debug(
                     "Converted schema for tool %s: %s",
                     name,
