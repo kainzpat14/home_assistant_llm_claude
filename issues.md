@@ -8,6 +8,8 @@
 ## 2. JSON Error with Longer Conversations
 **Status:** Open
 **Description:** Longer conversations lead to a JSON error. Chat history is not correctly encoded.
+**Error:** `Groq API error: Object of type Schema is not JSON serializable`
+**Additional Context:** This error only appears in conversations that use tools, suggesting the tool schema or tool response is being included in the conversation history in a way that cannot be serialized to JSON.
 
 ## 3. Tool Calls Not Shown in Chat Log
 **Status:** Open
