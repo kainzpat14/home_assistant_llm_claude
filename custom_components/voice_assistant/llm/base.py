@@ -3,10 +3,20 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, AsyncIterator
 
 if TYPE_CHECKING:
     from typing import Any
+
+
+@dataclass
+class StreamChunk:
+    """Represents a chunk of streaming response."""
+
+    content: str | None = None
+    tool_calls: list[dict[str, Any]] | None = None
+    is_final: bool = False
 
 
 class BaseLLMProvider(ABC):
@@ -57,6 +67,22 @@ class BaseLLMProvider(ABC):
 
         Yields:
             Response text chunks as they are generated.
+        """
+
+    @abstractmethod
+    async def generate_stream_with_tools(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> AsyncIterator[StreamChunk]:
+        """Generate streaming response with tool call support.
+
+        Args:
+            messages: List of conversation messages.
+            tools: Optional list of available tools/functions.
+
+        Yields:
+            StreamChunk objects containing either content deltas or accumulated tool calls.
         """
 
     @abstractmethod

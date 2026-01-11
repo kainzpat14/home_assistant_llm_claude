@@ -39,6 +39,9 @@ DEFAULT_MODELS = {
 
 # Conversation settings
 CONF_SYSTEM_PROMPT = "system_prompt"
+CONF_ENABLE_STREAMING = "enable_streaming"
+
+DEFAULT_ENABLE_STREAMING = False
 
 DEFAULT_SYSTEM_PROMPT = """You are a helpful home assistant that can control smart home devices and answer questions.
 

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, AsyncIterator
 
 from groq import AsyncGroq
 
-from .base import BaseLLMProvider
+from .base import BaseLLMProvider, StreamChunk
 
 if TYPE_CHECKING:
     from groq.types.chat import ChatCompletion
@@ -128,6 +128,79 @@ class GroqProvider(BaseLLMProvider):
             async for chunk in stream:
                 if chunk.choices and chunk.choices[0].delta.content:
                     yield chunk.choices[0].delta.content
+
+        except Exception as err:
+            _LOGGER.error("Groq streaming error: %s", err)
+            raise
+
+    async def generate_stream_with_tools(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> AsyncIterator[StreamChunk]:
+        """Generate streaming response with tool call accumulation.
+
+        Args:
+            messages: List of conversation messages.
+            tools: Optional list of tools.
+
+        Yields:
+            StreamChunk objects containing either content deltas or accumulated tool calls.
+        """
+        kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "stream": True,
+        }
+
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = "auto"
+
+        accumulated_tool_calls: list[dict[str, Any]] = []
+
+        try:
+            stream = await self.client.chat.completions.create(**kwargs)
+
+            async for chunk in stream:
+                choice = chunk.choices[0] if chunk.choices else None
+                if not choice:
+                    continue
+
+                delta = choice.delta
+
+                # Yield content chunks immediately
+                if delta.content:
+                    yield StreamChunk(content=delta.content)
+
+                # Accumulate tool calls (they come in pieces)
+                if delta.tool_calls:
+                    for tc_delta in delta.tool_calls:
+                        # Tool calls are indexed - accumulate by index
+                        idx = tc_delta.index
+                        while len(accumulated_tool_calls) <= idx:
+                            accumulated_tool_calls.append({
+                                "id": "",
+                                "type": "function",
+                                "function": {"name": "", "arguments": ""},
+                            })
+
+                        if tc_delta.id:
+                            accumulated_tool_calls[idx]["id"] = tc_delta.id
+                        if tc_delta.function:
+                            if tc_delta.function.name:
+                                accumulated_tool_calls[idx]["function"]["name"] += tc_delta.function.name
+                            if tc_delta.function.arguments:
+                                accumulated_tool_calls[idx]["function"]["arguments"] += tc_delta.function.arguments
+
+                # Check for finish reason
+                if choice.finish_reason:
+                    yield StreamChunk(
+                        tool_calls=accumulated_tool_calls if accumulated_tool_calls else None,
+                        is_final=True,
+                    )
 
         except Exception as err:
             _LOGGER.error("Groq streaming error: %s", err)
