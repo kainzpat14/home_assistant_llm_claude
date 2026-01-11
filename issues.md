@@ -6,10 +6,11 @@
 **Solution:** Set explicit `_LOGGER.setLevel(logging.DEBUG)` in all module initializations and added INFO/DEBUG logs to setup/unload functions. This ensures debug capability is available regardless of Home Assistant's logging configuration system.
 
 ## 2. JSON Error with Longer Conversations
-**Status:** Open
+**Status:** ✅ Resolved
 **Description:** Longer conversations lead to a JSON error. Chat history is not correctly encoded.
 **Error:** `Groq API error: Object of type Schema is not JSON serializable`
-**Additional Context:** This error only appears in conversations that use tools, suggesting the tool schema or tool response is being included in the conversation history in a way that cannot be serialized to JSON.
+**Root Cause:** Home Assistant's tool parameters were voluptuous Schema objects that weren't being converted to JSON-serializable dicts before being passed to the Groq API.
+**Solution:** Added `voluptuous-openapi` dependency and use its `convert()` function to properly serialize tool schemas in `_convert_tool_to_openai_format()`. This follows the pattern used in the existing ha-groq-cloud-api integration.
 
 ## 3. Tool Calls Not Shown in Chat Log
 **Status:** Open
