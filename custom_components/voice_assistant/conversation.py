@@ -267,18 +267,37 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
             })
 
             # Handle query_tools locally (not in chat_log - it's an internal meta-tool)
-            for tool_call in query_tools_calls:
-                arguments = json.loads(tool_call["function"]["arguments"])
-                _LOGGER.info("Handling query_tools with args: %s", arguments)
+            if query_tools_calls:
+                query_tools_summary = []
+                for tool_call in query_tools_calls:
+                    arguments = json.loads(tool_call["function"]["arguments"])
+                    _LOGGER.info("Handling query_tools with args: %s", arguments)
 
-                result = self._handle_query_tools(arguments, current_tools, tool_manager)
+                    result = self._handle_query_tools(arguments, current_tools, tool_manager)
 
-                # Add result to messages for LLM
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call["id"],
-                    "content": json.dumps(result),
-                })
+                    # Add result to messages for LLM
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "content": json.dumps(result),
+                    })
+
+                    # Build summary for chat_log
+                    domain_filter = arguments.get("domain", "all domains")
+                    if result.get("success"):
+                        tools_found = result.get("result", {}).get("tools", [])
+                        query_tools_summary.append(
+                            f"Discovered {len(tools_found)} tools for {domain_filter}"
+                        )
+
+                # Add a message to chat_log describing what query_tools did
+                if query_tools_summary:
+                    summary_content = AssistantContent(
+                        agent_id=DOMAIN,
+                        content="\n".join(query_tools_summary),
+                    )
+                    chat_log.async_add_assistant_content_without_tools(summary_content)
+                    _LOGGER.debug("Added query_tools summary to chat_log")
 
             # Handle real HA tools through chat_log
             if ha_tool_calls:
