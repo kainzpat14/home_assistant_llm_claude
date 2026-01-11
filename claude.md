@@ -140,24 +140,17 @@ custom_components/
 - [ ] Anthropic provider
 - [ ] Local LLM support (Ollama)
 
-## Recently Resolved Issues
+## Current Development Status
 
-All major integration issues have been resolved (see `issues.md`):
-- ✅ Debug logging visibility
-- ✅ JSON serialization errors
-- ✅ Tool calls visibility in chat log
-- ✅ System prompt override
-- ✅ Conversation history preservation
-- ✅ Tool schema validation errors
+⚠️ **This project is in active development and not ready for production use.**
 
-## Implementation Documentation
-
-Initial implementation plans in `docs/implementation/` have been completed:
-- ~~`01-groq-provider.md`~~ - Groq provider implemented and working
-- ~~`02-conversation-agent.md`~~ - Conversation agent implemented and working
-- ~~`03-ha-api-client.md`~~ - Using Home Assistant's native LLM API instead
-
-These files are kept for historical reference but the implementation has evolved beyond the original plans.
+### Recently Completed
+- Debug logging implementation and visibility
+- JSON serialization for tool schemas
+- Tool calls visibility in chat log UI
+- System prompt override functionality
+- Conversation history preservation
+- Tool schema validation fixes
 
 ## Next Steps
 

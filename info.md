@@ -46,22 +46,27 @@ This integration takes a unique approach to voice assistance in Home Assistant:
 
 ## Development Status
 
-This integration is fully functional with core features implemented and tested.
+⚠️ **This integration is currently in active development and should not be used in production.**
 
-**✅ Implemented:**
+**✅ Recently Completed:**
 - Complete integration structure
 - Configuration flow with API key validation
 - Provider abstraction layer
-- Groq provider with full tool calling support
+- Groq provider with tool calling support
 - Conversation agent with memory
 - Dynamic tool discovery and execution
 - Home Assistant API integration via native LLM API
 - Chat log integration for conversation history
 - System prompt customization
 
-**⏳ Planned:**
+**🔧 In Progress:**
+- Testing and bug fixes
 - Streaming response support
+- Documentation and user guides
+
+**⏳ Planned:**
 - Additional LLM providers (OpenAI, Anthropic, local LLMs)
+- Public release via HACS
 - Advanced customization options
 
 ## Need Help?
