@@ -418,6 +418,7 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         # Convert chat_log content to OpenAI message format
         # Skip SystemContent - we use our own system prompt above
         if hasattr(chat_log, "content") and chat_log.content:
+            _LOGGER.debug("chat_log has %d content items", len(chat_log.content))
             for content in chat_log.content:
                 content_type = type(content).__name__
                 if content_type == "SystemContent":
@@ -426,13 +427,21 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                     continue
                 elif content_type == "UserContent":
                     messages.append({"role": "user", "content": content.content})
+                    _LOGGER.debug("Added user message from chat_log: %s", content.content[:50])
                 elif content_type == "AssistantContent":
                     messages.append({"role": "assistant", "content": content.content})
+                    _LOGGER.debug("Added assistant message from chat_log: %s", str(content.content)[:50] if content.content else "None")
+        else:
+            _LOGGER.debug("chat_log has no content or content attribute")
 
         # Add current user message if not already in chat_log
         if not messages or messages[-1].get("content") != user_text:
             messages.append({"role": "user", "content": user_text})
+            _LOGGER.debug("Added current user message (not in chat_log)")
+        else:
+            _LOGGER.debug("Current user message already in chat_log")
 
+        _LOGGER.info("Built %d messages for LLM (including system prompt)", len(messages))
         return messages
 
     async def async_added_to_hass(self) -> None:
