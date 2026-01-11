@@ -7,9 +7,13 @@ import logging
 from typing import TYPE_CHECKING, Any, Literal
 
 from homeassistant.components import conversation
+from homeassistant.components.conversation.models import (
+    AssistantContent,
+    ToolResultContent,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import intent
+from homeassistant.helpers import intent, llm
 from homeassistant.util import ulid
 
 from .const import (
@@ -144,7 +148,7 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         try:
             # Process with potential tool calls
             assistant_message = await self._process_with_tools(
-                messages, current_tools, tool_manager
+                messages, current_tools, tool_manager, chat_log, user_input
             )
 
             intent_response = intent.IntentResponse(language=user_input.language)
@@ -167,11 +171,62 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                 conversation_id=conversation_id,
             )
 
+    def _convert_tool_calls_to_inputs(
+        self,
+        tool_calls: list[dict[str, Any]],
+        user_input: conversation.ConversationInput,
+    ) -> list[llm.ToolInput]:
+        """Convert Groq tool calls to Home Assistant ToolInput format.
+
+        Args:
+            tool_calls: Tool calls from Groq API.
+            user_input: The original user input for context.
+
+        Returns:
+            List of ToolInput objects for Home Assistant.
+        """
+        tool_inputs = []
+        for tool_call in tool_calls:
+            tool_name = tool_call["function"]["name"]
+            # Parse arguments from JSON string to dict
+            try:
+                tool_args = json.loads(tool_call["function"]["arguments"])
+            except json.JSONDecodeError:
+                _LOGGER.warning(
+                    "Failed to parse tool arguments for %s: %s",
+                    tool_name,
+                    tool_call["function"]["arguments"],
+                )
+                tool_args = {}
+
+            tool_input = llm.ToolInput(
+                tool_name=tool_name,
+                tool_args=tool_args,
+                platform=DOMAIN,
+                context=user_input.context,
+                user_prompt=user_input.text,
+                language=user_input.language,
+                assistant="conversation",
+                device_id=user_input.device_id,
+                id=tool_call["id"],
+            )
+            tool_inputs.append(tool_input)
+            _LOGGER.debug(
+                "Converted tool call: %s with args: %s (id: %s)",
+                tool_name,
+                tool_args,
+                tool_call["id"],
+            )
+
+        return tool_inputs
+
     async def _process_with_tools(
         self,
         messages: list[dict[str, Any]],
         current_tools: list[dict[str, Any]],
         tool_manager: LLMToolManager,
+        chat_log: ChatLog,
+        user_input: conversation.ConversationInput,
     ) -> str:
         """Process messages with dynamic tool discovery.
 
@@ -179,52 +234,95 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
             messages: Conversation messages.
             current_tools: Currently available tools.
             tool_manager: The tool manager for discovering and executing tools.
+            chat_log: The chat log for storing conversation content.
+            user_input: The original user input for context.
 
         Returns:
             Final assistant response text.
         """
         for iteration in range(MAX_TOOL_ITERATIONS):
+            _LOGGER.debug("Tool iteration %d starting", iteration + 1)
+
             # Generate with currently available tools
             response = await self.provider.generate(messages, current_tools)
 
             # If no tool calls, return the content
             if "tool_calls" not in response or not response["tool_calls"]:
+                _LOGGER.debug("No tool calls in response, returning content")
                 return response.get("content", "")
 
-            # Add assistant message with tool calls to history
+            tool_calls = response["tool_calls"]
+            _LOGGER.info("Received %d tool call(s) in iteration %d", len(tool_calls), iteration + 1)
+
+            # Separate query_tools from real HA tools
+            query_tools_calls = []
+            ha_tool_calls = []
+
+            for tool_call in tool_calls:
+                tool_name = tool_call["function"]["name"]
+                if tool_name == "query_tools":
+                    query_tools_calls.append(tool_call)
+                else:
+                    ha_tool_calls.append(tool_call)
+
+            # Add assistant message with tool calls to history for LLM context
             messages.append({
                 "role": "assistant",
                 "content": response.get("content"),
-                "tool_calls": response["tool_calls"],
+                "tool_calls": tool_calls,
             })
 
-            # Process each tool call
-            for tool_call in response["tool_calls"]:
-                tool_name = tool_call["function"]["name"]
+            # Handle query_tools locally (not in chat_log)
+            for tool_call in query_tools_calls:
                 arguments = json.loads(tool_call["function"]["arguments"])
+                _LOGGER.debug("Handling query_tools with args: %s", arguments)
 
-                _LOGGER.debug(
-                    "Iteration %d: Executing tool %s with args: %s",
-                    iteration + 1,
-                    tool_name,
-                    arguments,
-                )
+                result = self._handle_query_tools(arguments, current_tools, tool_manager)
 
-                # Handle query_tools specially
-                if tool_name == "query_tools":
-                    result = self._handle_query_tools(arguments, current_tools, tool_manager)
-                else:
-                    # Execute HA tool via tool manager
-                    result = await tool_manager.execute_tool(tool_name, arguments)
-
-                # Add tool result to messages
+                # Add result to messages for LLM
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tool_call["id"],
                     "content": json.dumps(result),
                 })
 
+            # Handle real HA tools through chat_log
+            if ha_tool_calls:
+                _LOGGER.info("Processing %d Home Assistant tool call(s)", len(ha_tool_calls))
+
+                # Convert to ToolInput objects
+                tool_inputs = self._convert_tool_calls_to_inputs(ha_tool_calls, user_input)
+
+                # Create AssistantContent with tool calls
+                assistant_content = AssistantContent(
+                    agent_id=DOMAIN,
+                    content=response.get("content"),
+                    tool_calls=tool_inputs,
+                )
+
+                _LOGGER.debug(
+                    "Adding assistant content to chat_log with %d tool call(s)",
+                    len(tool_inputs),
+                )
+
+                # Add to chat_log and execute tools
+                # This returns an async generator of ToolResultContent
+                async for tool_result in chat_log.async_add_assistant_content(assistant_content):
+                    _LOGGER.info(
+                        "Tool %s executed with result (success: %s)",
+                        tool_result.tool_name,
+                        "data" in tool_result.tool_result if isinstance(tool_result.tool_result, dict) else "unknown",
+                    )
+
+                    # Add tool result to messages for next LLM iteration
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_result.tool_call_id,
+                        "content": json.dumps(tool_result.tool_result),
+                    })
+
         # If we hit max iterations, return last content or error
+        _LOGGER.warning("Hit max tool iterations (%d)", MAX_TOOL_ITERATIONS)
         return response.get("content", "I encountered an issue processing your request.")
 
     def _handle_query_tools(
