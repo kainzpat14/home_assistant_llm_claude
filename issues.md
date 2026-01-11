@@ -1,8 +1,9 @@
 # Home Assistant Claude Integration - Known Issues
 
 ## 1. Debug Logging Not Visible
-**Status:** Open
-**Description:** Debug logging is not visible in Home Assistant even though it has been enabled in the integration UI and in configuration.yaml.
+**Status:** ✅ Resolved
+**Description:** Debug logging was not visible in Home Assistant even though it had been enabled in the integration UI and in configuration.yaml.
+**Solution:** Set explicit `_LOGGER.setLevel(logging.DEBUG)` in all module initializations and added INFO/DEBUG logs to setup/unload functions. This ensures debug capability is available regardless of Home Assistant's logging configuration system.
 
 ## 2. JSON Error with Longer Conversations
 **Status:** Open
