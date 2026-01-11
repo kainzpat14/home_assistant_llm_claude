@@ -236,10 +236,10 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         tool_manager: LLMToolManager,
         chat_log: ChatLog,
         user_input: conversation.ConversationInput,
-    ) -> AsyncIterator[str]:
+    ) -> AsyncIterator[dict[str, Any]]:
         """Stream LLM response with tool call handling.
 
-        This generator yields content chunks for streaming. Tool calls are handled
+        This generator yields content deltas for streaming. Tool calls are handled
         without yielding, and only the final text response is streamed.
 
         Args:
@@ -250,7 +250,7 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
             user_input: The user input.
 
         Yields:
-            Content chunks as strings.
+            Delta dictionaries with "content" key.
         """
         for iteration in range(MAX_TOOL_ITERATIONS):
             _LOGGER.debug("Streaming iteration %d starting", iteration + 1)
@@ -262,14 +262,14 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
             async for chunk in self.provider.generate_stream_with_tools(messages, current_tools):
                 if chunk.content:
                     accumulated_content += chunk.content
+                    # Yield content delta immediately for streaming
+                    yield {"content": chunk.content}
                 if chunk.is_final and chunk.tool_calls:
                     tool_calls = chunk.tool_calls
 
-            # If no tool calls, yield the content for streaming
+            # If no tool calls, we're done (content already streamed)
             if not tool_calls:
-                _LOGGER.debug("No tool calls, streaming final response")
-                # Yield content in chunks (streaming happens here)
-                yield accumulated_content
+                _LOGGER.debug("No tool calls, streaming complete")
                 return
 
             # Handle tool calls (not streamed to user)
@@ -348,7 +348,7 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
 
         # Max iterations reached
         _LOGGER.warning("Hit max streaming iterations (%d)", MAX_TOOL_ITERATIONS)
-        yield "I encountered an issue processing your request."
+        yield {"content": "I encountered an issue processing your request."}
 
     def _convert_tool_calls_to_inputs(
         self,
