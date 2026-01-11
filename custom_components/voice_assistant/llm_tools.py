@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from voluptuous_openapi import convert
+
 if TYPE_CHECKING:
     from homeassistant.components.conversation import ChatLog
 
@@ -110,12 +112,20 @@ class LLMToolManager:
             if not name:
                 return None
 
+            # Convert parameters using voluptuous_openapi to handle Schema objects
+            # This converts Home Assistant's voluptuous schemas to JSON-serializable dicts
+            if parameters:
+                custom_serializer = getattr(self.llm_api, "custom_serializer", None)
+                parameters = convert(parameters, custom_serializer=custom_serializer)
+            else:
+                parameters = {"type": "object", "properties": {}, "required": []}
+
             return {
                 "type": "function",
                 "function": {
                     "name": name,
                     "description": description or f"Execute {name}",
-                    "parameters": parameters if parameters else {"type": "object", "properties": {}, "required": []},
+                    "parameters": parameters,
                 },
             }
         except Exception as err:
