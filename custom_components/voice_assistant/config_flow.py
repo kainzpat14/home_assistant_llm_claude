@@ -28,6 +28,7 @@ from .const import (
 from .llm import create_llm_provider
 
 _LOGGER = logging.getLogger(__name__)
+_LOGGER.setLevel(logging.DEBUG)
 
 DEFAULT_OPTIONS = {
     CONF_PROVIDER: PROVIDER_GROQ,

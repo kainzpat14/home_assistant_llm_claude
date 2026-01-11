@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from groq.types.chat import ChatCompletion
 
 _LOGGER = logging.getLogger(__name__)
+_LOGGER.setLevel(logging.DEBUG)
 
 
 class GroqProvider(BaseLLMProvider):
