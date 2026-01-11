@@ -100,68 +100,81 @@ custom_components/
 | `temperature` | Response creativity (0.0 - 1.0) | No (default: 0.7) |
 | `max_tokens` | Maximum response length | No (default: 1024) |
 
-## Implementation Phases
+## Implementation Status
 
-### Phase 1: Foundation (Completed)
+### Phase 1: Foundation ✅ COMPLETE
 - [x] Project structure setup
 - [x] Basic integration skeleton (`__init__.py`)
 - [x] Configuration flow (`config_flow.py`)
 - [x] LLM provider abstraction layer (`llm/base.py`)
 - [x] HACS compatibility files
 
-### Phase 2: Core LLM Integration (In Progress)
-**See:** `docs/implementation/01-groq-provider.md`
-- [ ] Groq API implementation (`llm/groq.py`)
-- [ ] Provider factory (`llm/factory.py`)
-- [ ] API key validation in config flow
+### Phase 2: Core LLM Integration ✅ COMPLETE
+- [x] Groq API implementation (`llm/groq.py`)
+- [x] Provider factory (`llm/__init__.py`)
+- [x] API key validation in config flow
+- [x] Non-streaming response generation
 
-### Phase 3: Conversation Agent
-**See:** `docs/implementation/02-conversation-agent.md`
-- [ ] Conversation agent entity (`conversation.py`)
-- [ ] Message history management
-- [ ] Integration with voice pipeline
+### Phase 3: Conversation Agent ✅ COMPLETE
+- [x] Conversation agent entity (`conversation.py`)
+- [x] Message history management via chat_log integration
+- [x] Integration with Home Assistant's conversation system
+- [x] System prompt override functionality
 
-### Phase 4: Home Assistant API Integration
-**See:** `docs/implementation/03-ha-api-client.md`
-- [ ] HA API client wrapper (`ha_client/client.py`)
-- [ ] Tool definitions (`ha_client/tools.py`)
-- [ ] Entity discovery tools
-- [ ] Service execution tools
-- [ ] State query tools
-- [ ] Tool calling loop in conversation agent
+### Phase 4: Home Assistant API Integration ✅ COMPLETE
+- [x] Dynamic tool discovery using Home Assistant's native LLM API (`llm_tools.py`)
+- [x] `query_tools` meta-tool for on-demand tool loading
+- [x] Tool execution via chat_log.async_add_assistant_content()
+- [x] Tool schema conversion with voluptuous-openapi
+- [x] Array field description enhancement for better LLM comprehension
+- [x] Tool calling loop in conversation agent
+- [x] Chat log integration for conversation history
 
-### Phase 5: Advanced Features
-- [ ] Streaming response support
-- [ ] Dynamic tool loading
-- [ ] Conversation context management
+### Phase 5: Advanced Features 🔄 PARTIAL
+- [x] Dynamic tool loading (query_tools meta-tool)
+- [x] Conversation context management (chat_log integration)
+- [ ] Streaming response support (TODO: Future enhancement)
 
-### Phase 6: Additional Providers
+### Phase 6: Additional Providers ⏳ NOT STARTED
 - [ ] OpenAI provider
 - [ ] Anthropic provider
 - [ ] Local LLM support (Ollama)
 
-## Implementation Plans
+## Recently Resolved Issues
 
-Detailed implementation plans are available in `docs/implementation/`:
+All major integration issues have been resolved (see `issues.md`):
+- ✅ Debug logging visibility
+- ✅ JSON serialization errors
+- ✅ Tool calls visibility in chat log
+- ✅ System prompt override
+- ✅ Conversation history preservation
+- ✅ Tool schema validation errors
 
-| Order | File | Description |
-|-------|------|-------------|
-| 1 | `01-groq-provider.md` | Groq LLM provider with streaming support |
-| 2 | `02-conversation-agent.md` | Home Assistant conversation agent |
-| 3 | `03-ha-api-client.md` | HA API client and tool definitions |
+## Implementation Documentation
 
-**Instructions for Sonnet:** Follow the implementation plans in order. Each plan contains:
-- Complete code for each file
-- Step-by-step implementation instructions
-- Testing guidance
-- Dependencies on previous steps
+Initial implementation plans in `docs/implementation/` have been completed:
+- ~~`01-groq-provider.md`~~ - Groq provider implemented and working
+- ~~`02-conversation-agent.md`~~ - Conversation agent implemented and working
+- ~~`03-ha-api-client.md`~~ - Using Home Assistant's native LLM API instead
 
-**Note for Future Implementation Plans:** When creating new implementation plans, provide only:
-- High-level approach and architecture decisions
-- Key implementation pointers and considerations
-- File structure and what each file should do
-- Important gotchas or Home Assistant-specific patterns
-- DO NOT include complete code - let Sonnet implement based on patterns and pointers
+These files are kept for historical reference but the implementation has evolved beyond the original plans.
+
+## Next Steps
+
+### Immediate Future Work
+1. **Streaming Response Support** - Add streaming via Home Assistant's delta function for real-time responses
+2. **Testing & Documentation** - Comprehensive testing and user documentation
+3. **HACS Publication** - Prepare for public release via HACS
+
+### Future Enhancements
+1. **Additional LLM Providers** (Phase 6)
+   - OpenAI API integration
+   - Anthropic Claude API integration
+   - Local LLM support (Ollama, llama.cpp)
+2. **Advanced Features**
+   - Custom tool definitions
+   - Enhanced context management
+   - Multi-turn conversation improvements
 
 ## Development Notes
 
