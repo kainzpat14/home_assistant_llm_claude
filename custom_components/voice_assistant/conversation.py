@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, AsyncIterator, Literal
 
 from homeassistant.components import conversation
 from homeassistant.components.conversation import (
@@ -18,18 +18,21 @@ from homeassistant.util import ulid
 
 from .const import (
     CONF_API_KEY,
+    CONF_ENABLE_STREAMING,
     CONF_LLM_HASS_API,
     CONF_MAX_TOKENS,
     CONF_MODEL,
     CONF_PROVIDER,
     CONF_SYSTEM_PROMPT,
     CONF_TEMPERATURE,
+    DEFAULT_ENABLE_STREAMING,
     DEFAULT_MAX_TOKENS,
     DEFAULT_SYSTEM_PROMPT,
     DEFAULT_TEMPERATURE,
     DOMAIN,
 )
 from .llm import create_llm_provider
+from .llm.base import StreamChunk
 from .llm_tools import LLMToolManager
 
 if TYPE_CHECKING:
@@ -97,6 +100,36 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         if self._get_config(CONF_LLM_HASS_API):
             features |= conversation.ConversationEntityFeature.CONTROL
         return features
+
+    async def async_process(
+        self,
+        user_input: conversation.ConversationInput,
+    ) -> conversation.ConversationResult:
+        """Process user input - entry point from HA.
+
+        Args:
+            user_input: The user's conversation input.
+
+        Returns:
+            The conversation result.
+        """
+        # Check if streaming is enabled and supported
+        if self._get_config(CONF_ENABLE_STREAMING, DEFAULT_ENABLE_STREAMING):
+            _LOGGER.debug("Streaming enabled, using streaming handler")
+            # Use async_get_result_from_chat_log for streaming
+            return await conversation.async_get_result_from_chat_log(
+                self.hass,
+                user_input,
+                self._async_handle_message_streaming,
+            )
+        else:
+            _LOGGER.debug("Streaming disabled, using non-streaming handler")
+            # Use default non-streaming path
+            return await conversation.async_get_result_from_chat_log(
+                self.hass,
+                user_input,
+                self._async_handle_message,
+            )
 
     async def _async_handle_message(
         self,
@@ -181,6 +214,92 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
             )
             return conversation.ConversationResult(
                 response=intent_response,
+                conversation_id=conversation_id,
+            )
+
+    async def _async_handle_message_streaming(
+        self,
+        user_input: conversation.ConversationInput,
+        chat_log: ChatLog,
+    ) -> AsyncIterator[conversation.ConversationResultDelta]:
+        """Handle message with streaming response.
+
+        This method is called when streaming is enabled.
+
+        Args:
+            user_input: The user's input.
+            chat_log: The chat log containing llm_api and conversation history.
+
+        Yields:
+            ConversationResultDelta objects for real-time updates.
+        """
+        conversation_id = user_input.conversation_id or ulid.ulid_now()
+
+        # Setup (same as non-streaming)
+        try:
+            await chat_log.async_provide_llm_data(
+                user_input.as_llm_context(DOMAIN),
+                self._get_config(CONF_LLM_HASS_API),
+                self._get_config(CONF_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT),
+                None,  # Ignore HA's extra_system_prompt
+            )
+            _LOGGER.debug("Provided LLM data for streaming with our system prompt")
+        except conversation.ConverseError as err:
+            _LOGGER.error("Error providing LLM data: %s", err)
+            # Yield error delta
+            yield conversation.ConversationResultDelta(
+                response=intent.IntentResponseDelta(
+                    speech=f"Sorry, I encountered an error: {err}",
+                    speech_finished=True,
+                ),
+                conversation_id=conversation_id,
+            )
+            return
+
+        tool_manager = LLMToolManager(chat_log)
+        current_tools = LLMToolManager.get_initial_tools()
+        messages = self._build_messages(
+            user_input.text,
+            chat_log,
+            self._get_config(CONF_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT),
+        )
+
+        try:
+            # Process with streaming
+            full_response = ""
+            async for chunk in self._process_with_tools_streaming(
+                messages, current_tools, tool_manager, chat_log, user_input
+            ):
+                if chunk.content:
+                    full_response += chunk.content
+                    # Yield delta to Home Assistant
+                    yield conversation.ConversationResultDelta(
+                        response=intent.IntentResponseDelta(speech=chunk.content),
+                        conversation_id=conversation_id,
+                    )
+
+            # Add final response to chat_log for conversation history
+            final_assistant_content = AssistantContent(
+                agent_id=DOMAIN,
+                content=full_response,
+            )
+            chat_log.async_add_assistant_content_without_tools(final_assistant_content)
+            _LOGGER.debug("Added final assistant response to chat_log for conversation history")
+
+            # Yield final result indicating speech is finished
+            yield conversation.ConversationResultDelta(
+                response=intent.IntentResponseDelta(speech_finished=True),
+                conversation_id=conversation_id,
+            )
+
+        except Exception as err:
+            _LOGGER.error("Error processing streaming conversation: %s", err)
+            # Yield error delta
+            yield conversation.ConversationResultDelta(
+                response=intent.IntentResponseDelta(
+                    speech=f"Sorry, I encountered an error: {err}",
+                    speech_finished=True,
+                ),
                 conversation_id=conversation_id,
             )
 
@@ -350,6 +469,152 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         # If we hit max iterations, return last content or error
         _LOGGER.warning("Hit max tool iterations (%d)", MAX_TOOL_ITERATIONS)
         return response.get("content", "I encountered an issue processing your request.")
+
+    async def _process_with_tools_streaming(
+        self,
+        messages: list[dict[str, Any]],
+        current_tools: list[dict[str, Any]],
+        tool_manager: LLMToolManager,
+        chat_log: ChatLog,
+        user_input: conversation.ConversationInput,
+    ) -> AsyncIterator[StreamChunk]:
+        """Process with tools using streaming.
+
+        Key difference from non-streaming:
+        - Yields content chunks as they arrive
+        - Tool calls are collected at the end of each stream
+        - Only the final response (no tool calls) is streamed to user
+
+        Args:
+            messages: Conversation messages.
+            current_tools: Currently available tools.
+            tool_manager: The tool manager for discovering and executing tools.
+            chat_log: The chat log for storing conversation content.
+            user_input: The original user input for context.
+
+        Yields:
+            StreamChunk objects with content or final tool calls.
+        """
+        for iteration in range(MAX_TOOL_ITERATIONS):
+            _LOGGER.debug("Streaming tool iteration %d starting", iteration + 1)
+
+            accumulated_content = ""
+            tool_calls = None
+
+            # Stream from LLM and accumulate tool calls
+            async for chunk in self.provider.generate_stream_with_tools(messages, current_tools):
+                if chunk.content:
+                    accumulated_content += chunk.content
+                    # Don't yield yet - we need to see if there are tool calls
+                if chunk.is_final and chunk.tool_calls:
+                    tool_calls = chunk.tool_calls
+
+            # If no tool calls, this is the final response - yield all content
+            if not tool_calls:
+                _LOGGER.debug("No tool calls in streaming response, yielding content")
+                # Yield content in chunks for streaming effect
+                # Split into words to simulate streaming
+                words = accumulated_content.split()
+                for i, word in enumerate(words):
+                    if i < len(words) - 1:
+                        yield StreamChunk(content=word + " ")
+                    else:
+                        yield StreamChunk(content=word, is_final=True)
+                return
+
+            # Handle tool calls (same logic as non-streaming)
+            _LOGGER.info("Received %d tool call(s) in streaming iteration %d", len(tool_calls), iteration + 1)
+
+            # Separate query_tools from real HA tools
+            query_tools_calls = []
+            ha_tool_calls = []
+
+            for tool_call in tool_calls:
+                tool_name = tool_call["function"]["name"]
+                if tool_name == "query_tools":
+                    query_tools_calls.append(tool_call)
+                else:
+                    ha_tool_calls.append(tool_call)
+
+            # Add assistant message with tool calls to history
+            messages.append({
+                "role": "assistant",
+                "content": accumulated_content,
+                "tool_calls": tool_calls,
+            })
+
+            # Handle query_tools locally
+            if query_tools_calls:
+                query_tools_summary = []
+                for tool_call in query_tools_calls:
+                    arguments = json.loads(tool_call["function"]["arguments"])
+                    _LOGGER.info("Handling query_tools with args: %s", arguments)
+
+                    result = self._handle_query_tools(arguments, current_tools, tool_manager)
+
+                    # Add result to messages for LLM
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "content": json.dumps(result),
+                    })
+
+                    # Build summary for chat_log
+                    domain_filter = arguments.get("domain", "all domains")
+                    if result.get("success"):
+                        tools_found = result.get("result", {}).get("tools", [])
+                        query_tools_summary.append(
+                            f"Discovered {len(tools_found)} tools for {domain_filter}"
+                        )
+
+                # Add summary to chat_log
+                if query_tools_summary:
+                    summary_content = AssistantContent(
+                        agent_id=DOMAIN,
+                        content="\n".join(query_tools_summary),
+                    )
+                    chat_log.async_add_assistant_content_without_tools(summary_content)
+                    _LOGGER.debug("Added query_tools summary to chat_log")
+
+            # Handle real HA tools through chat_log
+            if ha_tool_calls:
+                _LOGGER.info("Processing %d Home Assistant tool call(s)", len(ha_tool_calls))
+
+                # Convert to ToolInput objects
+                tool_inputs = self._convert_tool_calls_to_inputs(ha_tool_calls, user_input)
+
+                # Create AssistantContent with tool calls
+                assistant_content = AssistantContent(
+                    agent_id=DOMAIN,
+                    content=accumulated_content,
+                    tool_calls=tool_inputs,
+                )
+
+                _LOGGER.debug(
+                    "Adding assistant content to chat_log with %d tool call(s)",
+                    len(tool_inputs),
+                )
+
+                # Add to chat_log and execute tools
+                async for tool_result in chat_log.async_add_assistant_content(assistant_content):
+                    _LOGGER.info(
+                        "Tool %s executed with result (success: %s)",
+                        tool_result.tool_name,
+                        "data" in tool_result.tool_result if isinstance(tool_result.tool_result, dict) else "unknown",
+                    )
+
+                    # Add tool result to messages for next LLM iteration
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_result.tool_call_id,
+                        "content": json.dumps(tool_result.tool_result),
+                    })
+
+            # Continue to next iteration to get LLM response after tool execution
+
+        # Max iterations reached
+        _LOGGER.warning("Hit max streaming tool iterations (%d)", MAX_TOOL_ITERATIONS)
+        yield StreamChunk(content="I encountered an issue processing your request.", is_final=True)
 
     def _handle_query_tools(
         self,

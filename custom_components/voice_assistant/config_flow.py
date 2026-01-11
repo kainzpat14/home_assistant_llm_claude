@@ -13,11 +13,13 @@ from homeassistant.core import callback
 from homeassistant.helpers import llm, selector
 
 from .const import (
+    CONF_ENABLE_STREAMING,
     CONF_LLM_HASS_API,
     CONF_MAX_TOKENS,
     CONF_MODEL,
     CONF_PROVIDER,
     CONF_TEMPERATURE,
+    DEFAULT_ENABLE_STREAMING,
     DEFAULT_MAX_TOKENS,
     DEFAULT_MODELS,
     DEFAULT_TEMPERATURE,
@@ -166,6 +168,12 @@ class VoiceAssistantOptionsFlow(OptionsFlow):
                             CONF_MAX_TOKENS, DEFAULT_OPTIONS[CONF_MAX_TOKENS]
                         ),
                     ): vol.Coerce(int),
+                    vol.Optional(
+                        CONF_ENABLE_STREAMING,
+                        default=self.config_entry.options.get(
+                            CONF_ENABLE_STREAMING, DEFAULT_ENABLE_STREAMING
+                        ),
+                    ): bool,
                 }
             ),
             errors=errors,
