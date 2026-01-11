@@ -143,7 +143,11 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         current_tools = LLMToolManager.get_initial_tools()
 
         # Build messages from chat_log content and add system prompt
-        messages = self._build_messages(user_input.text, chat_log)
+        messages = self._build_messages(
+            user_input.text,
+            chat_log,
+            self._get_config(CONF_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT),
+        )
 
         try:
             # Process with potential tool calls
@@ -392,26 +396,33 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
             }
 
     def _build_messages(
-        self, user_text: str, chat_log: ChatLog
+        self, user_text: str, chat_log: ChatLog, system_prompt: str
     ) -> list[dict[str, Any]]:
         """Build the messages list for the LLM from chat_log.
 
         Args:
             user_text: The current user message.
             chat_log: The chat log with conversation history.
+            system_prompt: The system prompt to use (from integration config).
 
         Returns:
             List of messages in OpenAI format.
         """
         messages: list[dict[str, Any]] = []
 
+        # Always use our own system prompt, ignore Home Assistant's
+        messages.append({"role": "system", "content": system_prompt})
+        _LOGGER.debug("Using integration system prompt (length: %d)", len(system_prompt))
+
         # Convert chat_log content to OpenAI message format
-        # chat_log already has system prompt from async_provide_llm_data
+        # Skip SystemContent - we use our own system prompt above
         if hasattr(chat_log, "content") and chat_log.content:
             for content in chat_log.content:
                 content_type = type(content).__name__
                 if content_type == "SystemContent":
-                    messages.append({"role": "system", "content": content.content})
+                    # Skip - we use our own system prompt
+                    _LOGGER.debug("Skipping Home Assistant system prompt")
+                    continue
                 elif content_type == "UserContent":
                     messages.append({"role": "user", "content": content.content})
                 elif content_type == "AssistantContent":
