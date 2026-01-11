@@ -7,7 +7,7 @@ import logging
 from typing import TYPE_CHECKING, Any, Literal
 
 from homeassistant.components import conversation
-from homeassistant.components.conversation.models import (
+from homeassistant.components.conversation import (
     AssistantContent,
     ToolResultContent,
 )
