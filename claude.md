@@ -152,6 +152,10 @@ custom_components/
 - Conversation history preservation
 - Tool schema validation fixes
 
+### Important Documentation
+- **[REQUIREMENTS.md](REQUIREMENTS.md)** - Additional requirements for conversation history management and voice assistant listening control
+- **[SESSION_NOTES.md](SESSION_NOTES.md)** - Critical implementation details, patterns, and lessons learned from development
+
 ## Next Steps
 
 ### Immediate Future Work
