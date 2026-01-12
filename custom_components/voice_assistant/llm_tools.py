@@ -51,6 +51,34 @@ QUERY_FACTS_DEFINITION = {
     },
 }
 
+# The meta-tool that allows LLM to learn and store facts about the user
+LEARN_FACT_DEFINITION = {
+    "type": "function",
+    "function": {
+        "name": "learn_fact",
+        "description": "Store a fact about the user or their home for future reference. Use this when the user shares information you should remember (names, preferences, routines, pet names, etc.). The fact will be available in future conversations.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "description": "Category of the fact: 'user_name', 'family_members', 'preferences', 'device_nicknames', 'locations', 'routines'",
+                    "enum": ["user_name", "family_members", "preferences", "device_nicknames", "locations", "routines"],
+                },
+                "key": {
+                    "type": "string",
+                    "description": "A unique key for this fact (e.g., 'cat_name', 'favorite_temperature', 'bedroom_light_nickname')",
+                },
+                "value": {
+                    "type": "string",
+                    "description": "The fact value to store",
+                },
+            },
+            "required": ["category", "key", "value"],
+        },
+    },
+}
+
 
 class LLMToolManager:
     """Manager for dynamic LLM tool discovery using chat_log."""
@@ -209,6 +237,6 @@ class LLMToolManager:
         """Get initial meta-tools available to the LLM.
 
         Returns:
-            List with query_tools and query_facts definitions.
+            List with query_tools, query_facts, and learn_fact definitions.
         """
-        return [QUERY_TOOLS_DEFINITION, QUERY_FACTS_DEFINITION]
+        return [QUERY_TOOLS_DEFINITION, QUERY_FACTS_DEFINITION, LEARN_FACT_DEFINITION]

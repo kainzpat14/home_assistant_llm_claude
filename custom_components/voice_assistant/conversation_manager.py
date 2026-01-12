@@ -36,9 +36,8 @@ Return ONLY valid JSON, no explanation."""
 
 @dataclass
 class ConversationSession:
-    """Represents an active conversation session."""
+    """Represents a global conversation session across all HA conversations."""
 
-    conversation_id: str
     messages: list[dict[str, Any]] = field(default_factory=list)
     last_activity: datetime = field(default_factory=datetime.now)
 
@@ -47,9 +46,16 @@ class ConversationSession:
         self.messages.append({"role": role, "content": content})
         self.last_activity = datetime.now()
 
-    def is_expired(self, timeout_minutes: int) -> bool:
-        """Check if session has expired."""
-        return datetime.now() - self.last_activity > timedelta(minutes=timeout_minutes)
+    def is_expired(self, timeout_seconds: int) -> bool:
+        """Check if session has expired.
+
+        Args:
+            timeout_seconds: Timeout in seconds.
+
+        Returns:
+            True if session has expired.
+        """
+        return (datetime.now() - self.last_activity).total_seconds() > timeout_seconds
 
     def get_conversation_text(self) -> str:
         """Get conversation as text for fact extraction."""
@@ -60,21 +66,32 @@ class ConversationSession:
             lines.append(f"{role}: {content}")
         return "\n".join(lines)
 
+    def clear(self) -> None:
+        """Clear all messages from the session."""
+        self.messages.clear()
+        self.last_activity = datetime.now()
+
 
 class ConversationManager:
-    """Manages conversation sessions with timeout and fact learning."""
+    """Manages a global conversation session with timeout and fact learning."""
 
     def __init__(
         self,
         hass: HomeAssistant,
         fact_store: FactStore,
-        timeout_minutes: int = 5,
+        timeout_seconds: int = 60,
     ) -> None:
-        """Initialize the conversation manager."""
+        """Initialize the conversation manager.
+
+        Args:
+            hass: Home Assistant instance.
+            fact_store: Fact storage.
+            timeout_seconds: Timeout in seconds (default 60).
+        """
         self.hass = hass
         self.fact_store = fact_store
-        self.timeout_minutes = timeout_minutes
-        self._sessions: dict[str, ConversationSession] = {}
+        self.timeout_seconds = timeout_seconds
+        self._session: ConversationSession = ConversationSession()
         self._cleanup_task: asyncio.Task | None = None
         self._llm_provider = None  # Set by conversation agent
 
@@ -82,43 +99,33 @@ class ConversationManager:
         """Set the LLM provider for fact extraction."""
         self._llm_provider = provider
 
-    def get_or_create_session(self, conversation_id: str) -> ConversationSession:
-        """Get existing session or create new one."""
-        # Check for expired session first
-        if conversation_id in self._sessions:
-            session = self._sessions[conversation_id]
-            if session.is_expired(self.timeout_minutes):
-                # Session expired - extract facts and create new
-                asyncio.create_task(self._handle_session_timeout(session))
-                del self._sessions[conversation_id]
-            else:
-                return session
+    def get_session(self) -> ConversationSession:
+        """Get the global session, checking for expiration.
 
-        # Create new session
-        session = ConversationSession(conversation_id=conversation_id)
-        self._sessions[conversation_id] = session
-        return session
+        Returns:
+            The global conversation session.
+        """
+        # Check if session expired
+        if self._session.is_expired(self.timeout_seconds):
+            # Session expired - extract facts and clear
+            _LOGGER.info("Global session expired, extracting facts and clearing")
+            asyncio.create_task(self._handle_session_timeout())
+            self._session.clear()
 
-    def get_session(self, conversation_id: str) -> ConversationSession | None:
-        """Get session if exists and not expired."""
-        session = self._sessions.get(conversation_id)
-        if session and not session.is_expired(self.timeout_minutes):
-            return session
-        return None
+        return self._session
 
-    async def _handle_session_timeout(self, session: ConversationSession) -> None:
+    async def _handle_session_timeout(self) -> None:
         """Handle session timeout - extract and save facts."""
-        if not session.messages:
+        if not self._session.messages:
             return
 
         _LOGGER.info(
-            "Session %s timed out with %d messages, extracting facts",
-            session.conversation_id,
-            len(session.messages),
+            "Session timed out with %d messages, extracting facts",
+            len(self._session.messages),
         )
 
         try:
-            await self._extract_and_save_facts(session)
+            await self._extract_and_save_facts(self._session)
         except Exception as err:
             _LOGGER.error("Error extracting facts: %s", err)
 
@@ -192,15 +199,14 @@ class ConversationManager:
                 pass
 
     async def _cleanup_loop(self) -> None:
-        """Periodically check for and clean up expired sessions."""
+        """Periodically check for and clean up expired session."""
         while True:
-            await asyncio.sleep(60)  # Check every minute
+            # Check more frequently for shorter timeouts
+            check_interval = min(30, self.timeout_seconds / 2)
+            await asyncio.sleep(check_interval)
 
-            expired_ids = []
-            for conv_id, session in self._sessions.items():
-                if session.is_expired(self.timeout_minutes):
-                    expired_ids.append(conv_id)
-
-            for conv_id in expired_ids:
-                session = self._sessions.pop(conv_id)
-                await self._handle_session_timeout(session)
+            # Check if global session expired
+            if self._session.is_expired(self.timeout_seconds) and self._session.messages:
+                _LOGGER.info("Background cleanup: session expired, extracting facts")
+                await self._handle_session_timeout()
+                self._session.clear()

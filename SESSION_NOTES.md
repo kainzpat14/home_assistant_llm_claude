@@ -35,21 +35,70 @@ if prop_schema.get("type") == "array" and "description" not in prop_schema:
 
 Without this, LLMs pass strings instead of arrays, causing validation errors.
 
-### Conversation History Management
+### Conversation History Management ✅ COMPLETED
 
-**Critical Implementation Detail:** The final assistant response MUST be added to chat_log for conversation memory to work.
+**Architecture:** Single global session across ALL Home Assistant conversations
 
-**Bug Fixed:** Initially, we only added tool calls to chat_log but forgot the final response. This caused the LLM to lose all context between turns.
+**Key Design:**
+- ONE `ConversationSession` for all conversations (not per conversation_id)
+- Session messages added to LLM context, providing cross-conversation memory
+- Timeout in **seconds** (1-600s range, default 60s)
+- Session expires after inactivity, triggering automatic fact extraction
+- `chat_log` used only for HA UI, **session is source of truth for LLM**
 
-**Correct Pattern:**
+**Implementation Pattern:**
 ```python
-# After getting final response
-final_assistant_content = AssistantContent(
-    agent_id=DOMAIN,
-    content=assistant_message,
-)
-chat_log.async_add_assistant_content_without_tools(final_assistant_content)
+# Single global session (not per conversation_id)
+session = self._conversation_manager.get_session()
+session.add_message("user", user_input.text)
+
+# Build messages from session (not chat_log!)
+def _build_messages(...):
+    messages = [{"role": "system", "content": system_prompt}]
+    messages.extend(session.messages)  # All messages from global session
+    return messages
 ```
+
+**Why This Design:**
+- Cross-conversation memory: "remember my cat is Amy" → new conversation → "what's my cat's name?" works!
+- Timeout in seconds for faster fact extraction (60s default vs 5 min before)
+- Simpler: One session vs many per-conversation sessions
+- Session messages = LLM sees full recent history across all conversations
+
+**Fact Learning Implementation:**
+
+Three meta-tools for fact management:
+1. **query_facts**: On-demand fact retrieval (saves tokens vs. auto-injection)
+2. **learn_fact**: Immediate fact storage when user shares information
+3. **Automatic extraction**: Facts extracted from conversation on timeout
+
+**Key Pattern:**
+```python
+LEARN_FACT_DEFINITION = {
+    "function": {
+        "name": "learn_fact",
+        "parameters": {
+            "properties": {
+                "category": {"enum": ["user_name", "family_members", "preferences",
+                                      "device_nicknames", "locations", "routines"]},
+                "key": {"type": "string"},
+                "value": {"type": "string"},
+            },
+            "required": ["category", "key", "value"],
+        },
+    },
+}
+
+async def _handle_learn_fact(self, arguments):
+    self._fact_store.add_fact(key, value)
+    await self._fact_store.async_save()
+```
+
+**Why This Design:**
+- Facts queryable immediately, not just after timeout
+- LLM decides when to learn/query facts (token efficient)
+- Facts persist across conversations via FactStore
+- Dual learning: explicit (learn_fact) + implicit (timeout extraction)
 
 ### System Prompt Override
 

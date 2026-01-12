@@ -75,7 +75,7 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         self._conversation_manager = ConversationManager(
             hass,
             self._fact_store,
-            timeout_minutes=self._get_config(CONF_CONVERSATION_TIMEOUT, DEFAULT_CONVERSATION_TIMEOUT),
+            timeout_seconds=self._get_config(CONF_CONVERSATION_TIMEOUT, DEFAULT_CONVERSATION_TIMEOUT),
         )
 
     def _get_config(self, key: str, default: Any = None) -> Any:
@@ -131,11 +131,10 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         Returns:
             The conversation result.
         """
-        # Get or create session for conversation tracking
-        conversation_id = user_input.conversation_id or ulid.ulid_now()
-        session = self._conversation_manager.get_or_create_session(conversation_id)
+        # Get global session for conversation tracking
+        session = self._conversation_manager.get_session()
 
-        # Add user message to session
+        # Add user message to global session
         session.add_message("user", user_input.text)
 
         # Provide LLM data to chat_log to set up llm_api
@@ -314,9 +313,10 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
             # Handle tool calls (not streamed to user)
             _LOGGER.info("Processing %d tool call(s) in iteration %d", len(tool_calls), iteration + 1)
 
-            # Separate meta-tools (query_tools, query_facts) from HA tools
+            # Separate meta-tools (query_tools, query_facts, learn_fact) from HA tools
             query_tools_calls = []
             query_facts_calls = []
+            learn_fact_calls = []
             ha_tool_calls = []
 
             for tool_call in tool_calls:
@@ -325,6 +325,8 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                     query_tools_calls.append(tool_call)
                 elif tool_name == "query_facts":
                     query_facts_calls.append(tool_call)
+                elif tool_name == "learn_fact":
+                    learn_fact_calls.append(tool_call)
                 else:
                     ha_tool_calls.append(tool_call)
 
@@ -390,6 +392,34 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                     summary_content = AssistantContent(
                         agent_id=DOMAIN,
                         content="\n".join(query_facts_summary),
+                    )
+                    chat_log.async_add_assistant_content_without_tools(summary_content)
+
+            # Handle learn_fact
+            if learn_fact_calls:
+                learn_fact_summary = []
+                for tool_call in learn_fact_calls:
+                    arguments = json.loads(tool_call["function"]["arguments"])
+                    _LOGGER.info("Handling learn_fact: %s", arguments)
+
+                    result = await self._handle_learn_fact(arguments)
+
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "content": json.dumps(result),
+                    })
+
+                    if result.get("success"):
+                        key = arguments.get("key", "unknown")
+                        learn_fact_summary.append(
+                            f"Learned fact: {key}"
+                        )
+
+                if learn_fact_summary:
+                    summary_content = AssistantContent(
+                        agent_id=DOMAIN,
+                        content="\n".join(learn_fact_summary),
                     )
                     chat_log.async_add_assistant_content_without_tools(summary_content)
 
@@ -498,9 +528,10 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
             tool_calls = response["tool_calls"]
             _LOGGER.info("Received %d tool call(s) in iteration %d", len(tool_calls), iteration + 1)
 
-            # Separate meta-tools (query_tools, query_facts) from real HA tools
+            # Separate meta-tools (query_tools, query_facts, learn_fact) from real HA tools
             query_tools_calls = []
             query_facts_calls = []
+            learn_fact_calls = []
             ha_tool_calls = []
 
             for tool_call in tool_calls:
@@ -509,6 +540,8 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                     query_tools_calls.append(tool_call)
                 elif tool_name == "query_facts":
                     query_facts_calls.append(tool_call)
+                elif tool_name == "learn_fact":
+                    learn_fact_calls.append(tool_call)
                 else:
                     ha_tool_calls.append(tool_call)
 
@@ -584,6 +617,38 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                     )
                     chat_log.async_add_assistant_content_without_tools(summary_content)
                     _LOGGER.debug("Added query_facts summary to chat_log")
+
+            # Handle learn_fact locally (not in chat_log - it's an internal meta-tool)
+            if learn_fact_calls:
+                learn_fact_summary = []
+                for tool_call in learn_fact_calls:
+                    arguments = json.loads(tool_call["function"]["arguments"])
+                    _LOGGER.info("Handling learn_fact with args: %s", arguments)
+
+                    result = await self._handle_learn_fact(arguments)
+
+                    # Add result to messages for LLM
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "content": json.dumps(result),
+                    })
+
+                    # Build summary for chat_log
+                    if result.get("success"):
+                        key = arguments.get("key", "unknown")
+                        learn_fact_summary.append(
+                            f"Learned fact: {key}"
+                        )
+
+                # Add a message to chat_log describing what learn_fact did
+                if learn_fact_summary:
+                    summary_content = AssistantContent(
+                        agent_id=DOMAIN,
+                        content="\n".join(learn_fact_summary),
+                    )
+                    chat_log.async_add_assistant_content_without_tools(summary_content)
+                    _LOGGER.debug("Added learn_fact summary to chat_log")
 
             # Handle real HA tools through chat_log
             if ha_tool_calls:
@@ -722,14 +787,63 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                 "error": f"Failed to query facts: {err}",
             }
 
+    async def _handle_learn_fact(
+        self,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Handle learn_fact meta-tool call.
+
+        Stores a fact immediately to the FactStore so it's available
+        for future conversations without waiting for session timeout.
+
+        Args:
+            arguments: Tool arguments with category, key, value.
+
+        Returns:
+            Result confirming fact was stored.
+        """
+        category = arguments.get("category")
+        key = arguments.get("key")
+        value = arguments.get("value")
+
+        if not key or not value:
+            return {
+                "success": False,
+                "error": "Missing required parameters: key and value are required",
+            }
+
+        try:
+            # Store fact immediately
+            self._fact_store.add_fact(key, value)
+            await self._fact_store.async_save()
+
+            _LOGGER.info(
+                "Stored fact: %s = %s (category: %s)",
+                key,
+                value,
+                category or "unspecified",
+            )
+
+            return {
+                "success": True,
+                "message": f"Successfully stored {key}",
+            }
+
+        except Exception as err:
+            _LOGGER.error("Error storing fact: %s", err)
+            return {
+                "success": False,
+                "error": f"Failed to store fact: {err}",
+            }
+
     def _build_messages(
         self, user_text: str, chat_log: ChatLog, system_prompt: str
     ) -> list[dict[str, Any]]:
-        """Build the messages list for the LLM from chat_log.
+        """Build the messages list for the LLM from global session.
 
         Args:
             user_text: The current user message.
-            chat_log: The chat log with conversation history.
+            chat_log: The chat log (not used - kept for compatibility).
             system_prompt: The system prompt to use (from integration config).
 
         Returns:
@@ -737,36 +851,17 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         """
         messages: list[dict[str, Any]] = []
 
-        # Always use our own system prompt, ignore Home Assistant's
-        # Facts are no longer auto-injected - LLM queries them on-demand with query_facts
+        # Always use our own system prompt
         messages.append({"role": "system", "content": system_prompt})
         _LOGGER.debug("Using integration system prompt (length: %d)", len(system_prompt))
 
-        # Convert chat_log content to OpenAI message format
-        # Skip SystemContent - we use our own system prompt above
-        if hasattr(chat_log, "content") and chat_log.content:
-            _LOGGER.debug("chat_log has %d content items", len(chat_log.content))
-            for content in chat_log.content:
-                content_type = type(content).__name__
-                if content_type == "SystemContent":
-                    # Skip - we use our own system prompt
-                    _LOGGER.debug("Skipping Home Assistant system prompt")
-                    continue
-                elif content_type == "UserContent":
-                    messages.append({"role": "user", "content": content.content})
-                    _LOGGER.debug("Added user message from chat_log: %s", content.content[:50])
-                elif content_type == "AssistantContent":
-                    messages.append({"role": "assistant", "content": content.content})
-                    _LOGGER.debug("Added assistant message from chat_log: %s", str(content.content)[:50] if content.content else "None")
+        # Add global session messages (cross-conversation history)
+        session = self._conversation_manager.get_session()
+        if session.messages:
+            _LOGGER.debug("Adding %d messages from global session", len(session.messages))
+            messages.extend(session.messages)
         else:
-            _LOGGER.debug("chat_log has no content or content attribute")
-
-        # Add current user message if not already in chat_log
-        if not messages or messages[-1].get("content") != user_text:
-            messages.append({"role": "user", "content": user_text})
-            _LOGGER.debug("Added current user message (not in chat_log)")
-        else:
-            _LOGGER.debug("Current user message already in chat_log")
+            _LOGGER.debug("No messages in global session")
 
         _LOGGER.info("Built %d messages for LLM (including system prompt)", len(messages))
         return messages
