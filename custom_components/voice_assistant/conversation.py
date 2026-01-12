@@ -75,7 +75,7 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         self._conversation_manager = ConversationManager(
             hass,
             self._fact_store,
-            timeout_minutes=self._get_config(CONF_CONVERSATION_TIMEOUT, DEFAULT_CONVERSATION_TIMEOUT),
+            timeout_seconds=self._get_config(CONF_CONVERSATION_TIMEOUT, DEFAULT_CONVERSATION_TIMEOUT),
         )
 
     def _get_config(self, key: str, default: Any = None) -> Any:
@@ -131,11 +131,10 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         Returns:
             The conversation result.
         """
-        # Get or create session for conversation tracking
-        conversation_id = user_input.conversation_id or ulid.ulid_now()
-        session = self._conversation_manager.get_or_create_session(conversation_id)
+        # Get global session for conversation tracking
+        session = self._conversation_manager.get_session()
 
-        # Add user message to session
+        # Add user message to global session
         session.add_message("user", user_input.text)
 
         # Provide LLM data to chat_log to set up llm_api
@@ -840,11 +839,11 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
     def _build_messages(
         self, user_text: str, chat_log: ChatLog, system_prompt: str
     ) -> list[dict[str, Any]]:
-        """Build the messages list for the LLM from chat_log.
+        """Build the messages list for the LLM from global session.
 
         Args:
             user_text: The current user message.
-            chat_log: The chat log with conversation history.
+            chat_log: The chat log (not used - kept for compatibility).
             system_prompt: The system prompt to use (from integration config).
 
         Returns:
@@ -852,36 +851,17 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         """
         messages: list[dict[str, Any]] = []
 
-        # Always use our own system prompt, ignore Home Assistant's
-        # Facts are no longer auto-injected - LLM queries them on-demand with query_facts
+        # Always use our own system prompt
         messages.append({"role": "system", "content": system_prompt})
         _LOGGER.debug("Using integration system prompt (length: %d)", len(system_prompt))
 
-        # Convert chat_log content to OpenAI message format
-        # Skip SystemContent - we use our own system prompt above
-        if hasattr(chat_log, "content") and chat_log.content:
-            _LOGGER.debug("chat_log has %d content items", len(chat_log.content))
-            for content in chat_log.content:
-                content_type = type(content).__name__
-                if content_type == "SystemContent":
-                    # Skip - we use our own system prompt
-                    _LOGGER.debug("Skipping Home Assistant system prompt")
-                    continue
-                elif content_type == "UserContent":
-                    messages.append({"role": "user", "content": content.content})
-                    _LOGGER.debug("Added user message from chat_log: %s", content.content[:50])
-                elif content_type == "AssistantContent":
-                    messages.append({"role": "assistant", "content": content.content})
-                    _LOGGER.debug("Added assistant message from chat_log: %s", str(content.content)[:50] if content.content else "None")
+        # Add global session messages (cross-conversation history)
+        session = self._conversation_manager.get_session()
+        if session.messages:
+            _LOGGER.debug("Adding %d messages from global session", len(session.messages))
+            messages.extend(session.messages)
         else:
-            _LOGGER.debug("chat_log has no content or content attribute")
-
-        # Add current user message if not already in chat_log
-        if not messages or messages[-1].get("content") != user_text:
-            messages.append({"role": "user", "content": user_text})
-            _LOGGER.debug("Added current user message (not in chat_log)")
-        else:
-            _LOGGER.debug("Current user message already in chat_log")
+            _LOGGER.debug("No messages in global session")
 
         _LOGGER.info("Built %d messages for LLM (including system prompt)", len(messages))
         return messages

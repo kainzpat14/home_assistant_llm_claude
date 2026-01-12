@@ -183,7 +183,7 @@ class VoiceAssistantOptionsFlow(OptionsFlow):
                         default=self.config_entry.options.get(
                             CONF_CONVERSATION_TIMEOUT, DEFAULT_CONVERSATION_TIMEOUT
                         ),
-                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=60)),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=600)),
                     vol.Optional(
                         CONF_ENABLE_FACT_LEARNING,
                         default=self.config_entry.options.get(
