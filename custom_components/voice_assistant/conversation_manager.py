@@ -26,7 +26,7 @@ Categories to look for:
 - locations: Room names, locations of devices
 - routines: Regular patterns (wake time, bedtime, etc.)
 
-Only include facts that were explicitly stated or clearly implied. If no facts were learned, return an empty object {}.
+Only include facts that were explicitly stated or clearly implied. If no facts were learned, return an empty object {{}}.
 
 Conversation:
 {conversation}
