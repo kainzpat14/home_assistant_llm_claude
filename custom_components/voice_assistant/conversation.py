@@ -314,9 +314,10 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
             # Handle tool calls (not streamed to user)
             _LOGGER.info("Processing %d tool call(s) in iteration %d", len(tool_calls), iteration + 1)
 
-            # Separate meta-tools (query_tools, query_facts) from HA tools
+            # Separate meta-tools (query_tools, query_facts, learn_fact) from HA tools
             query_tools_calls = []
             query_facts_calls = []
+            learn_fact_calls = []
             ha_tool_calls = []
 
             for tool_call in tool_calls:
@@ -325,6 +326,8 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                     query_tools_calls.append(tool_call)
                 elif tool_name == "query_facts":
                     query_facts_calls.append(tool_call)
+                elif tool_name == "learn_fact":
+                    learn_fact_calls.append(tool_call)
                 else:
                     ha_tool_calls.append(tool_call)
 
@@ -390,6 +393,34 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                     summary_content = AssistantContent(
                         agent_id=DOMAIN,
                         content="\n".join(query_facts_summary),
+                    )
+                    chat_log.async_add_assistant_content_without_tools(summary_content)
+
+            # Handle learn_fact
+            if learn_fact_calls:
+                learn_fact_summary = []
+                for tool_call in learn_fact_calls:
+                    arguments = json.loads(tool_call["function"]["arguments"])
+                    _LOGGER.info("Handling learn_fact: %s", arguments)
+
+                    result = await self._handle_learn_fact(arguments)
+
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "content": json.dumps(result),
+                    })
+
+                    if result.get("success"):
+                        key = arguments.get("key", "unknown")
+                        learn_fact_summary.append(
+                            f"Learned fact: {key}"
+                        )
+
+                if learn_fact_summary:
+                    summary_content = AssistantContent(
+                        agent_id=DOMAIN,
+                        content="\n".join(learn_fact_summary),
                     )
                     chat_log.async_add_assistant_content_without_tools(summary_content)
 
@@ -498,9 +529,10 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
             tool_calls = response["tool_calls"]
             _LOGGER.info("Received %d tool call(s) in iteration %d", len(tool_calls), iteration + 1)
 
-            # Separate meta-tools (query_tools, query_facts) from real HA tools
+            # Separate meta-tools (query_tools, query_facts, learn_fact) from real HA tools
             query_tools_calls = []
             query_facts_calls = []
+            learn_fact_calls = []
             ha_tool_calls = []
 
             for tool_call in tool_calls:
@@ -509,6 +541,8 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                     query_tools_calls.append(tool_call)
                 elif tool_name == "query_facts":
                     query_facts_calls.append(tool_call)
+                elif tool_name == "learn_fact":
+                    learn_fact_calls.append(tool_call)
                 else:
                     ha_tool_calls.append(tool_call)
 
@@ -584,6 +618,38 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                     )
                     chat_log.async_add_assistant_content_without_tools(summary_content)
                     _LOGGER.debug("Added query_facts summary to chat_log")
+
+            # Handle learn_fact locally (not in chat_log - it's an internal meta-tool)
+            if learn_fact_calls:
+                learn_fact_summary = []
+                for tool_call in learn_fact_calls:
+                    arguments = json.loads(tool_call["function"]["arguments"])
+                    _LOGGER.info("Handling learn_fact with args: %s", arguments)
+
+                    result = await self._handle_learn_fact(arguments)
+
+                    # Add result to messages for LLM
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "content": json.dumps(result),
+                    })
+
+                    # Build summary for chat_log
+                    if result.get("success"):
+                        key = arguments.get("key", "unknown")
+                        learn_fact_summary.append(
+                            f"Learned fact: {key}"
+                        )
+
+                # Add a message to chat_log describing what learn_fact did
+                if learn_fact_summary:
+                    summary_content = AssistantContent(
+                        agent_id=DOMAIN,
+                        content="\n".join(learn_fact_summary),
+                    )
+                    chat_log.async_add_assistant_content_without_tools(summary_content)
+                    _LOGGER.debug("Added learn_fact summary to chat_log")
 
             # Handle real HA tools through chat_log
             if ha_tool_calls:
@@ -720,6 +786,55 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
             return {
                 "success": False,
                 "error": f"Failed to query facts: {err}",
+            }
+
+    async def _handle_learn_fact(
+        self,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Handle learn_fact meta-tool call.
+
+        Stores a fact immediately to the FactStore so it's available
+        for future conversations without waiting for session timeout.
+
+        Args:
+            arguments: Tool arguments with category, key, value.
+
+        Returns:
+            Result confirming fact was stored.
+        """
+        category = arguments.get("category")
+        key = arguments.get("key")
+        value = arguments.get("value")
+
+        if not key or not value:
+            return {
+                "success": False,
+                "error": "Missing required parameters: key and value are required",
+            }
+
+        try:
+            # Store fact immediately
+            self._fact_store.add_fact(key, value)
+            await self._fact_store.async_save()
+
+            _LOGGER.info(
+                "Stored fact: %s = %s (category: %s)",
+                key,
+                value,
+                category or "unspecified",
+            )
+
+            return {
+                "success": True,
+                "message": f"Successfully stored {key}",
+            }
+
+        except Exception as err:
+            _LOGGER.error("Error storing fact: %s", err)
+            return {
+                "success": False,
+                "error": f"Failed to store fact: {err}",
             }
 
     def _build_messages(
