@@ -35,7 +35,7 @@ if prop_schema.get("type") == "array" and "description" not in prop_schema:
 
 Without this, LLMs pass strings instead of arrays, causing validation errors.
 
-### Conversation History Management
+### Conversation History Management ✅ COMPLETED
 
 **Critical Implementation Detail:** The final assistant response MUST be added to chat_log for conversation memory to work.
 
@@ -50,6 +50,41 @@ final_assistant_content = AssistantContent(
 )
 chat_log.async_add_assistant_content_without_tools(final_assistant_content)
 ```
+
+**Fact Learning Implementation:**
+
+Three meta-tools for fact management:
+1. **query_facts**: On-demand fact retrieval (saves tokens vs. auto-injection)
+2. **learn_fact**: Immediate fact storage when user shares information
+3. **Automatic extraction**: Facts extracted from conversation on timeout
+
+**Key Pattern:**
+```python
+LEARN_FACT_DEFINITION = {
+    "function": {
+        "name": "learn_fact",
+        "parameters": {
+            "properties": {
+                "category": {"enum": ["user_name", "family_members", "preferences",
+                                      "device_nicknames", "locations", "routines"]},
+                "key": {"type": "string"},
+                "value": {"type": "string"},
+            },
+            "required": ["category", "key", "value"],
+        },
+    },
+}
+
+async def _handle_learn_fact(self, arguments):
+    self._fact_store.add_fact(key, value)
+    await self._fact_store.async_save()
+```
+
+**Why This Design:**
+- Facts queryable immediately, not just after timeout
+- LLM decides when to learn/query facts (token efficient)
+- Facts persist across conversations via FactStore
+- Dual learning: explicit (learn_fact) + implicit (timeout extraction)
 
 ### System Prompt Override
 
