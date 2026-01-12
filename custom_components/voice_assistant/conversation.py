@@ -758,26 +758,21 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
 
         try:
             # Get all facts from fact store
-            all_facts = self._fact_store.get_all_facts()
-
-            # Filter by category if specified
-            if category:
-                filtered_facts = {k: v for k, v in all_facts.items() if k == category}
-                facts = filtered_facts
-            else:
-                facts = all_facts
+            # Note: category parameter is optional guidance for the LLM but we don't
+            # store facts with categories, so we return all facts and let the LLM filter
+            facts = self._fact_store.get_all_facts()
 
             _LOGGER.info(
                 "Queried %d facts%s",
                 len(facts),
-                f" for category '{category}'" if category else "",
+                f" (category '{category}' requested)" if category else "",
             )
 
             # Return facts to LLM
             return {
                 "success": True,
                 "facts": facts,
-                "message": f"Found {len(facts)} fact(s)" + (f" for category '{category}'" if category else ""),
+                "message": f"Found {len(facts)} fact(s)",
             }
 
         except Exception as err:
