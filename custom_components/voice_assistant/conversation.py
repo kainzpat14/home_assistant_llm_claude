@@ -314,14 +314,17 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
             # Handle tool calls (not streamed to user)
             _LOGGER.info("Processing %d tool call(s) in iteration %d", len(tool_calls), iteration + 1)
 
-            # Separate query_tools from HA tools
+            # Separate meta-tools (query_tools, query_facts) from HA tools
             query_tools_calls = []
+            query_facts_calls = []
             ha_tool_calls = []
 
             for tool_call in tool_calls:
                 tool_name = tool_call["function"]["name"]
                 if tool_name == "query_tools":
                     query_tools_calls.append(tool_call)
+                elif tool_name == "query_facts":
+                    query_facts_calls.append(tool_call)
                 else:
                     ha_tool_calls.append(tool_call)
 
@@ -358,6 +361,35 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                     summary_content = AssistantContent(
                         agent_id=DOMAIN,
                         content="\n".join(query_tools_summary),
+                    )
+                    chat_log.async_add_assistant_content_without_tools(summary_content)
+
+            # Handle query_facts
+            if query_facts_calls:
+                query_facts_summary = []
+                for tool_call in query_facts_calls:
+                    arguments = json.loads(tool_call["function"]["arguments"])
+                    _LOGGER.info("Handling query_facts: %s", arguments)
+
+                    result = self._handle_query_facts(arguments)
+
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "content": json.dumps(result),
+                    })
+
+                    category_filter = arguments.get("category", "all categories")
+                    if result.get("success"):
+                        facts_found = result.get("facts", {})
+                        query_facts_summary.append(
+                            f"Retrieved {len(facts_found)} facts for {category_filter}"
+                        )
+
+                if query_facts_summary:
+                    summary_content = AssistantContent(
+                        agent_id=DOMAIN,
+                        content="\n".join(query_facts_summary),
                     )
                     chat_log.async_add_assistant_content_without_tools(summary_content)
 
@@ -466,14 +498,17 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
             tool_calls = response["tool_calls"]
             _LOGGER.info("Received %d tool call(s) in iteration %d", len(tool_calls), iteration + 1)
 
-            # Separate query_tools from real HA tools
+            # Separate meta-tools (query_tools, query_facts) from real HA tools
             query_tools_calls = []
+            query_facts_calls = []
             ha_tool_calls = []
 
             for tool_call in tool_calls:
                 tool_name = tool_call["function"]["name"]
                 if tool_name == "query_tools":
                     query_tools_calls.append(tool_call)
+                elif tool_name == "query_facts":
+                    query_facts_calls.append(tool_call)
                 else:
                     ha_tool_calls.append(tool_call)
 
@@ -516,6 +551,39 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                     )
                     chat_log.async_add_assistant_content_without_tools(summary_content)
                     _LOGGER.debug("Added query_tools summary to chat_log")
+
+            # Handle query_facts locally (not in chat_log - it's an internal meta-tool)
+            if query_facts_calls:
+                query_facts_summary = []
+                for tool_call in query_facts_calls:
+                    arguments = json.loads(tool_call["function"]["arguments"])
+                    _LOGGER.info("Handling query_facts with args: %s", arguments)
+
+                    result = self._handle_query_facts(arguments)
+
+                    # Add result to messages for LLM
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "content": json.dumps(result),
+                    })
+
+                    # Build summary for chat_log
+                    category_filter = arguments.get("category", "all categories")
+                    if result.get("success"):
+                        facts_found = result.get("facts", {})
+                        query_facts_summary.append(
+                            f"Retrieved {len(facts_found)} facts for {category_filter}"
+                        )
+
+                # Add a message to chat_log describing what query_facts did
+                if query_facts_summary:
+                    summary_content = AssistantContent(
+                        agent_id=DOMAIN,
+                        content="\n".join(query_facts_summary),
+                    )
+                    chat_log.async_add_assistant_content_without_tools(summary_content)
+                    _LOGGER.debug("Added query_facts summary to chat_log")
 
             # Handle real HA tools through chat_log
             if ha_tool_calls:
@@ -609,6 +677,51 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                 "error": f"Failed to query tools: {err}",
             }
 
+    def _handle_query_facts(
+        self,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Handle query_facts meta-tool call.
+
+        Args:
+            arguments: Tool arguments (may contain 'category' filter).
+
+        Returns:
+            Result with learned facts.
+        """
+        category = arguments.get("category")
+
+        try:
+            # Get all facts from fact store
+            all_facts = self._fact_store.get_all_facts()
+
+            # Filter by category if specified
+            if category:
+                filtered_facts = {k: v for k, v in all_facts.items() if k == category}
+                facts = filtered_facts
+            else:
+                facts = all_facts
+
+            _LOGGER.info(
+                "Queried %d facts%s",
+                len(facts),
+                f" for category '{category}'" if category else "",
+            )
+
+            # Return facts to LLM
+            return {
+                "success": True,
+                "facts": facts,
+                "message": f"Found {len(facts)} fact(s)" + (f" for category '{category}'" if category else ""),
+            }
+
+        except Exception as err:
+            _LOGGER.error("Error handling query_facts: %s", err)
+            return {
+                "success": False,
+                "error": f"Failed to query facts: {err}",
+            }
+
     def _build_messages(
         self, user_text: str, chat_log: ChatLog, system_prompt: str
     ) -> list[dict[str, Any]]:
@@ -624,17 +737,10 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         """
         messages: list[dict[str, Any]] = []
 
-        # Build system prompt with facts if fact learning is enabled
-        full_system_prompt = system_prompt
-        if self._get_config(CONF_ENABLE_FACT_LEARNING, DEFAULT_ENABLE_FACT_LEARNING):
-            facts_section = self._conversation_manager.build_facts_prompt_section()
-            if facts_section:
-                full_system_prompt += facts_section
-                _LOGGER.debug("Added facts section to system prompt")
-
         # Always use our own system prompt, ignore Home Assistant's
-        messages.append({"role": "system", "content": full_system_prompt})
-        _LOGGER.debug("Using integration system prompt (length: %d)", len(full_system_prompt))
+        # Facts are no longer auto-injected - LLM queries them on-demand with query_facts
+        messages.append({"role": "system", "content": system_prompt})
+        _LOGGER.debug("Using integration system prompt (length: %d)", len(system_prompt))
 
         # Convert chat_log content to OpenAI message format
         # Skip SystemContent - we use our own system prompt above
