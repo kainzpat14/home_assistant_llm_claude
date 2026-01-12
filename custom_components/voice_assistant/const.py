@@ -40,8 +40,12 @@ DEFAULT_MODELS = {
 # Conversation settings
 CONF_SYSTEM_PROMPT = "system_prompt"
 CONF_ENABLE_STREAMING = "enable_streaming"
+CONF_CONVERSATION_TIMEOUT = "conversation_timeout"
+CONF_ENABLE_FACT_LEARNING = "enable_fact_learning"
 
 DEFAULT_ENABLE_STREAMING = False
+DEFAULT_CONVERSATION_TIMEOUT = 5  # minutes
+DEFAULT_ENABLE_FACT_LEARNING = True
 
 DEFAULT_SYSTEM_PROMPT = """You are a helpful home assistant that can control smart home devices and answer questions.
 

@@ -160,12 +160,74 @@ When testing conversation memory:
 
 ## Future Implementation Notes
 
-### Streaming Support
-Would require:
-- Implementing `generate_stream()` in BaseLLMProvider
-- Using `async_get_result_from_chat_log()` from HA conversation module
-- Yielding deltas as they arrive from LLM API
-- Groq SDK supports streaming with `stream=True` parameter
+### Streaming Support ✅ COMPLETED
+
+**Implementation Pattern (Following OpenAI Integration):**
+
+Streaming in Home Assistant works differently than expected. Key learnings:
+
+1. **Entity Declaration:**
+   ```python
+   class VoiceAssistantConversationAgent(conversation.ConversationEntity):
+       _attr_supports_streaming = True
+   ```
+
+2. **Use chat_log.async_add_delta_content_stream():**
+   ```python
+   async for _ in chat_log.async_add_delta_content_stream(
+       self.entity_id,
+       self._stream_response_with_tools(messages, current_tools, ...),
+   ):
+       pass  # chat_log handles streaming internally
+   ```
+
+3. **Yield Dictionaries, Not Strings:**
+   ```python
+   async def _stream_response_with_tools(...) -> AsyncIterator[dict[str, Any]]:
+       async for chunk in self.provider.generate_stream_with_tools(...):
+           if chunk.content:
+               yield {"content": chunk.content}  # ← MUST be dict with "content" key
+   ```
+
+4. **Don't Return Async Iterator from async_process:**
+   - The default `async_process` method in ConversationEntity handles streaming automatically
+   - Don't override it to return an async iterator
+   - Streaming is enabled by `_attr_supports_streaming = True` + using the stream methods
+
+5. **Tool Call Handling During Streaming:**
+   - Accumulate tool calls as they arrive (they come in chunks)
+   - Don't stream tool call execution to the user
+   - Only stream the final text response after tools complete
+   - Store accumulated content and tool_calls in the StreamChunk.is_final event
+
+**Common Mistakes to Avoid:**
+- ❌ Yielding plain strings instead of `{"content": "text"}` dicts
+- ❌ Trying to override `async_process` to return AsyncIterator[ConversationResultDelta]
+- ❌ Using `conversation.async_get_result_from_chat_log()` with handler parameter (it only takes 2 args)
+- ❌ Streaming tool calls to users (handle them silently in the background)
+
+**Groq Provider Streaming Implementation:**
+```python
+async def generate_stream_with_tools(...) -> AsyncIterator[StreamChunk]:
+    accumulated_tool_calls = []
+    async for chunk in stream:
+        if chunk.choices[0].delta.content:
+            yield StreamChunk(content=chunk.choices[0].delta.content)
+
+        if chunk.choices[0].delta.tool_calls:
+            # Accumulate tool calls by index
+            for tc_delta in chunk.choices[0].delta.tool_calls:
+                idx = tc_delta.index
+                # Append parts to accumulated_tool_calls[idx]
+
+        if chunk.choices[0].finish_reason:
+            yield StreamChunk(
+                tool_calls=accumulated_tool_calls if accumulated_tool_calls else None,
+                is_final=True
+            )
+```
+
+**Reference:** See OpenAI conversation integration in HA core for the official pattern.
 
 ### Additional Providers
 Pattern to follow:

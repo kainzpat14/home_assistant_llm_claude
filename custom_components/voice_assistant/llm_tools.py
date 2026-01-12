@@ -32,6 +32,25 @@ QUERY_TOOLS_DEFINITION = {
     },
 }
 
+# The meta-tool that allows LLM to query learned facts about the user
+QUERY_FACTS_DEFINITION = {
+    "type": "function",
+    "function": {
+        "name": "query_facts",
+        "description": "Query learned facts about the user and their home. Use this when you need context like user names, family members, preferences, device nicknames, locations, or routines. Only call when you actually need this information - don't query if not needed.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "description": "Optional: Filter facts by category ('user_name', 'family_members', 'preferences', 'device_nicknames', 'locations', 'routines'). If not specified, returns all learned facts.",
+                },
+            },
+            "required": [],
+        },
+    },
+}
+
 
 class LLMToolManager:
     """Manager for dynamic LLM tool discovery using chat_log."""
@@ -187,9 +206,9 @@ class LLMToolManager:
 
     @staticmethod
     def get_initial_tools() -> list[dict[str, Any]]:
-        """Get initial tools (just query_tools meta-tool).
+        """Get initial meta-tools available to the LLM.
 
         Returns:
-            List with only the query_tools definition.
+            List with query_tools and query_facts definitions.
         """
-        return [QUERY_TOOLS_DEFINITION]
+        return [QUERY_TOOLS_DEFINITION, QUERY_FACTS_DEFINITION]
