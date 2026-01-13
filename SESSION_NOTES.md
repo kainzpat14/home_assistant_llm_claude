@@ -278,6 +278,64 @@ async def generate_stream_with_tools(...) -> AsyncIterator[StreamChunk]:
 
 **Reference:** See OpenAI conversation integration in HA core for the official pattern.
 
+## Completed Features Summary
+
+### ✅ Streaming Support (Feature 1)
+**Status:** Fully implemented and tested
+- Real-time streaming of LLM responses using HA's pattern
+- Tool call accumulation during streaming
+- Proper delta format (`{"content": "..."}` dicts)
+- Configuration option to enable/disable streaming
+
+### ✅ Conversation History Management (Feature 2)
+**Status:** Fully implemented and tested
+- **Global session architecture**: Single session across ALL HA conversations
+- **Cross-conversation memory**: Session messages provide continuous context within timeout window
+- **Timeout management**: Configurable 1-600 seconds (default 60s)
+- **Fact persistence**: Three-tier fact learning system
+  - `learn_fact` meta-tool: Immediate fact storage when user shares info
+  - `query_facts` meta-tool: On-demand fact retrieval (token efficient)
+  - Automatic extraction: Background extraction when session expires
+
+**Bugs Fixed During Implementation:**
+1. **Fact extraction format error**: `{}` in prompt interpreted as format placeholder → Fixed by escaping as `{{}}`
+2. **query_facts category filtering bug**: Was checking if fact keys matched category name → Fixed by returning all facts (LLM filters)
+
+### Configuration Options
+All features can be configured via integration options:
+- `enable_streaming` (bool): Enable/disable streaming responses
+- `conversation_timeout` (int): Session timeout in seconds (1-600, default 60)
+- `enable_fact_learning` (bool): Enable/disable fact learning system
+- `auto_continue_listening` (bool): Enable/disable automatic listening after `?` (default: False)
+
+### Testing Results
+✅ Streaming with tool calls works correctly
+✅ Cross-conversation memory within timeout window
+✅ Fact learning and retrieval works immediately
+✅ Automatic fact extraction on timeout
+✅ All features work together without conflicts
+
+### ✅ Voice Assistant Listening Control (Feature 3)
+**Status:** Fully implemented and tested
+- **Listening control**: Prevent auto-listening after responses ending with `?`
+- **Configuration option**: `auto_continue_listening` (default: False)
+- **LLM marker**: `[CONTINUE_LISTENING]` for explicit listening requests
+- **Response processing**: Replaces `?` with fullwidth `？` in non-streaming mode
+- **Prompt instructions**: Automatically added when feature is enabled
+
+**How It Works:**
+- Default behavior: Voice assistant stops after response, even with `?`
+- LLM can include `[CONTINUE_LISTENING]` marker to request listening
+- Marker is removed from spoken response
+- Non-streaming: Response processed to replace final `?`
+- Streaming: LLM follows prompt instructions to use marker when needed
+
+**Configuration:**
+- `auto_continue_listening=False` (default): Controlled listening
+- `auto_continue_listening=True`: Normal HA behavior (all `?` trigger listening)
+
+**Ready for production use!** 🎉
+
 ### Additional Providers
 Pattern to follow:
 1. Create `llm/provider_name.py` inheriting from `BaseLLMProvider`

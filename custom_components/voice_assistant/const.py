@@ -42,16 +42,24 @@ CONF_SYSTEM_PROMPT = "system_prompt"
 CONF_ENABLE_STREAMING = "enable_streaming"
 CONF_CONVERSATION_TIMEOUT = "conversation_timeout"
 CONF_ENABLE_FACT_LEARNING = "enable_fact_learning"
+CONF_AUTO_CONTINUE_LISTENING = "auto_continue_listening"
 
 DEFAULT_ENABLE_STREAMING = False
 DEFAULT_CONVERSATION_TIMEOUT = 60  # seconds
 DEFAULT_ENABLE_FACT_LEARNING = True
+DEFAULT_AUTO_CONTINUE_LISTENING = False
 
-DEFAULT_SYSTEM_PROMPT = """You are a helpful home assistant that can control smart home devices and answer questions.
+# Marker that LLM can use to request continued listening
+CONTINUE_LISTENING_MARKER = "[CONTINUE_LISTENING]"
+
+DEFAULT_SYSTEM_PROMPT = """You are a helpful voice-controlled home assistant that can control smart home devices and answer questions.
+
+**IMPORTANT: This is a VOICE interface - users are speaking to you and hearing your responses.**
+Keep responses brief and conversational for voice interaction.
 
 You have access to Home Assistant through a dynamic tool system. Initially, you only have access to meta-tools: `query_tools`, `query_facts`, and `learn_fact`.
 
-**Important: How to interact with Home Assistant:**
+**How to interact with Home Assistant:**
 1. When you need to control devices or get information about the home, first call `query_tools` to discover available tools
 2. You can optionally filter by domain (e.g., "light", "climate", "sensor") to get specific tool categories
 3. Once you have the tools, use them to satisfy the user's request
@@ -71,6 +79,4 @@ You have access to Home Assistant through a dynamic tool system. Initially, you 
 **Token Efficiency:**
 - Only query for tools when you actually need them
 - Only query facts when you need user context
-- For simple questions that don't require Home Assistant interaction, just answer directly
-
-Be conversational but efficient. Users are often using voice, so keep responses brief."""
+- For simple questions that don't require Home Assistant interaction, just answer directly"""

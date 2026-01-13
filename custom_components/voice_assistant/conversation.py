@@ -18,6 +18,7 @@ from homeassistant.util import ulid
 
 from .const import (
     CONF_API_KEY,
+    CONF_AUTO_CONTINUE_LISTENING,
     CONF_CONVERSATION_TIMEOUT,
     CONF_ENABLE_FACT_LEARNING,
     CONF_ENABLE_STREAMING,
@@ -27,6 +28,7 @@ from .const import (
     CONF_PROVIDER,
     CONF_SYSTEM_PROMPT,
     CONF_TEMPERATURE,
+    DEFAULT_AUTO_CONTINUE_LISTENING,
     DEFAULT_CONVERSATION_TIMEOUT,
     DEFAULT_ENABLE_FACT_LEARNING,
     DEFAULT_ENABLE_STREAMING,
@@ -38,6 +40,10 @@ from .const import (
 from .conversation_manager import ConversationManager
 from .llm import create_llm_provider
 from .llm.base import StreamChunk
+from .response_processor import (
+    add_listening_instructions_to_prompt,
+    process_response_for_listening,
+)
 from .llm_tools import LLMToolManager
 from .storage import FactStore
 
@@ -219,15 +225,19 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
             messages, current_tools, tool_manager, chat_log, user_input
         )
 
-        # Add the final assistant response to chat_log
+        # Process response for listening control
+        auto_continue = self._get_config(CONF_AUTO_CONTINUE_LISTENING, DEFAULT_AUTO_CONTINUE_LISTENING)
+        processed_message, _ = process_response_for_listening(assistant_message, auto_continue)
+
+        # Add the PROCESSED response to chat_log (this is what gets spoken)
         final_assistant_content = AssistantContent(
             agent_id=DOMAIN,
-            content=assistant_message,
+            content=processed_message,
         )
         chat_log.async_add_assistant_content_without_tools(final_assistant_content)
         _LOGGER.debug("Added final assistant response to chat_log for conversation history")
 
-        # Track assistant message in session for fact learning
+        # Track ORIGINAL message in session for fact learning (preserve full context)
         session.add_message("assistant", assistant_message)
 
     async def _process_with_streaming(
@@ -297,6 +307,7 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
             tool_calls = None
 
             # Stream from LLM and accumulate
+            # Note: We yield chunks immediately for real-time streaming
             async for chunk in self.provider.generate_stream_with_tools(messages, current_tools):
                 if chunk.content:
                     accumulated_content += chunk.content
@@ -306,6 +317,9 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                     tool_calls = chunk.tool_calls
 
             # If no tool calls, we're done (content already streamed)
+            # Note: For streaming, listening control via response processing doesn't work well
+            # because content is already streamed. The marker/auto-continue setting in prompt
+            # is the primary control mechanism for streaming mode.
             if not tool_calls:
                 _LOGGER.debug("No tool calls, streaming complete")
                 return
@@ -846,9 +860,15 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         """
         messages: list[dict[str, Any]] = []
 
+        # Build system prompt with listening instructions if needed
+        full_system_prompt = system_prompt
+        if not self._get_config(CONF_AUTO_CONTINUE_LISTENING, DEFAULT_AUTO_CONTINUE_LISTENING):
+            full_system_prompt = add_listening_instructions_to_prompt(system_prompt)
+            _LOGGER.debug("Added listening control instructions to system prompt")
+
         # Always use our own system prompt
-        messages.append({"role": "system", "content": system_prompt})
-        _LOGGER.debug("Using integration system prompt (length: %d)", len(system_prompt))
+        messages.append({"role": "system", "content": full_system_prompt})
+        _LOGGER.debug("Using integration system prompt (length: %d)", len(full_system_prompt))
 
         # Add global session messages (cross-conversation history)
         session = self._conversation_manager.get_session()

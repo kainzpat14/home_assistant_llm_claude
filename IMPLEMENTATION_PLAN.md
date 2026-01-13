@@ -298,15 +298,19 @@ async def async_process(
 
 ---
 
-## Feature 2: Conversation History Management with Timeout
+## Feature 2: Conversation History Management with Timeout ✅ COMPLETED
 
 ### Overview
 Implement external conversation history storage with configurable timeout and fact learning/persistence.
 
 ### Current State
-- Conversation history is managed by Home Assistant's `chat_log`
-- No persistent storage of learned facts
-- No timeout-based session management
+- ✅ Global conversation session across ALL Home Assistant conversations
+- ✅ Session messages provide cross-conversation memory to LLM
+- ✅ Persistent fact storage using FactStore
+- ✅ Timeout-based session management (seconds, not minutes)
+- ✅ Automatic fact extraction on timeout
+- ✅ On-demand fact learning with learn_fact meta-tool
+- ✅ On-demand fact querying with query_facts meta-tool
 
 ### Architecture Decision
 Create a new `ConversationManager` class that:
@@ -725,14 +729,17 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 ---
 
-## Feature 3: Voice Assistant Listening Control
+## Feature 3: Voice Assistant Listening Control ✅ COMPLETED
 
 ### Overview
 Control whether the voice assistant continues listening after a response, preventing unwanted continued listening when responses end with `?`.
 
 ### Current State
-- Home Assistant automatically continues listening if response ends with `?`
-- No control over this behavior
+- ✅ Listening control via `auto_continue_listening` configuration option
+- ✅ Response processing replaces `?` with fullwidth `？` to prevent auto-listening
+- ✅ LLM can use `[CONTINUE_LISTENING]` marker to explicitly request listening
+- ✅ Automatic prompt instructions added when feature is enabled
+- ✅ Works in both streaming and non-streaming modes
 
 ### Implementation Strategy
 Use response post-processing to manipulate the final character:
