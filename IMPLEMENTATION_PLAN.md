@@ -729,14 +729,17 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 ---
 
-## Feature 3: Voice Assistant Listening Control
+## Feature 3: Voice Assistant Listening Control ✅ COMPLETED
 
 ### Overview
 Control whether the voice assistant continues listening after a response, preventing unwanted continued listening when responses end with `?`.
 
 ### Current State
-- Home Assistant automatically continues listening if response ends with `?`
-- No control over this behavior
+- ✅ Listening control via `auto_continue_listening` configuration option
+- ✅ Response processing replaces `?` with fullwidth `？` to prevent auto-listening
+- ✅ LLM can use `[CONTINUE_LISTENING]` marker to explicitly request listening
+- ✅ Automatic prompt instructions added when feature is enabled
+- ✅ Works in both streaming and non-streaming modes
 
 ### Implementation Strategy
 Use response post-processing to manipulate the final character:

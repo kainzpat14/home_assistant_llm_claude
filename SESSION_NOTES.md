@@ -306,6 +306,7 @@ All features can be configured via integration options:
 - `enable_streaming` (bool): Enable/disable streaming responses
 - `conversation_timeout` (int): Session timeout in seconds (1-600, default 60)
 - `enable_fact_learning` (bool): Enable/disable fact learning system
+- `auto_continue_listening` (bool): Enable/disable automatic listening after `?` (default: False)
 
 ### Testing Results
 ✅ Streaming with tool calls works correctly
@@ -313,6 +314,25 @@ All features can be configured via integration options:
 ✅ Fact learning and retrieval works immediately
 ✅ Automatic fact extraction on timeout
 ✅ All features work together without conflicts
+
+### ✅ Voice Assistant Listening Control (Feature 3)
+**Status:** Fully implemented and tested
+- **Listening control**: Prevent auto-listening after responses ending with `?`
+- **Configuration option**: `auto_continue_listening` (default: False)
+- **LLM marker**: `[CONTINUE_LISTENING]` for explicit listening requests
+- **Response processing**: Replaces `?` with fullwidth `？` in non-streaming mode
+- **Prompt instructions**: Automatically added when feature is enabled
+
+**How It Works:**
+- Default behavior: Voice assistant stops after response, even with `?`
+- LLM can include `[CONTINUE_LISTENING]` marker to request listening
+- Marker is removed from spoken response
+- Non-streaming: Response processed to replace final `?`
+- Streaming: LLM follows prompt instructions to use marker when needed
+
+**Configuration:**
+- `auto_continue_listening=False` (default): Controlled listening
+- `auto_continue_listening=True`: Normal HA behavior (all `?` trigger listening)
 
 **Ready for production use!** 🎉
 
