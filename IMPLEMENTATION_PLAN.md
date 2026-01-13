@@ -298,15 +298,19 @@ async def async_process(
 
 ---
 
-## Feature 2: Conversation History Management with Timeout
+## Feature 2: Conversation History Management with Timeout ✅ COMPLETED
 
 ### Overview
 Implement external conversation history storage with configurable timeout and fact learning/persistence.
 
 ### Current State
-- Conversation history is managed by Home Assistant's `chat_log`
-- No persistent storage of learned facts
-- No timeout-based session management
+- ✅ Global conversation session across ALL Home Assistant conversations
+- ✅ Session messages provide cross-conversation memory to LLM
+- ✅ Persistent fact storage using FactStore
+- ✅ Timeout-based session management (seconds, not minutes)
+- ✅ Automatic fact extraction on timeout
+- ✅ On-demand fact learning with learn_fact meta-tool
+- ✅ On-demand fact querying with query_facts meta-tool
 
 ### Architecture Decision
 Create a new `ConversationManager` class that:
