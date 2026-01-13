@@ -13,6 +13,7 @@ from homeassistant.core import callback
 from homeassistant.helpers import llm, selector
 
 from .const import (
+    CONF_AUTO_CONTINUE_LISTENING,
     CONF_CONVERSATION_TIMEOUT,
     CONF_ENABLE_FACT_LEARNING,
     CONF_ENABLE_STREAMING,
@@ -21,6 +22,7 @@ from .const import (
     CONF_MODEL,
     CONF_PROVIDER,
     CONF_TEMPERATURE,
+    DEFAULT_AUTO_CONTINUE_LISTENING,
     DEFAULT_CONVERSATION_TIMEOUT,
     DEFAULT_ENABLE_FACT_LEARNING,
     DEFAULT_ENABLE_STREAMING,
@@ -188,6 +190,12 @@ class VoiceAssistantOptionsFlow(OptionsFlow):
                         CONF_ENABLE_FACT_LEARNING,
                         default=self.config_entry.options.get(
                             CONF_ENABLE_FACT_LEARNING, DEFAULT_ENABLE_FACT_LEARNING
+                        ),
+                    ): bool,
+                    vol.Optional(
+                        CONF_AUTO_CONTINUE_LISTENING,
+                        default=self.config_entry.options.get(
+                            CONF_AUTO_CONTINUE_LISTENING, DEFAULT_AUTO_CONTINUE_LISTENING
                         ),
                     ): bool,
                 }
