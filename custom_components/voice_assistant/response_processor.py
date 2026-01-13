@@ -40,8 +40,14 @@ def process_response_for_listening(
     ends_with_question = processed.rstrip().endswith("?")
 
     if wants_listening:
-        # LLM explicitly wants listening - keep the ? intact
+        # LLM explicitly wants listening
         _LOGGER.debug("LLM requested continued listening via marker")
+
+        # If response doesn't end with ?, add one
+        if not ends_with_question:
+            processed = processed.rstrip() + "?"
+            _LOGGER.debug("Added question mark to response with CONTINUE_LISTENING marker")
+
         return processed, True
 
     if auto_continue_listening:
@@ -72,12 +78,13 @@ def add_listening_instructions_to_prompt(system_prompt: str) -> str:
 **Voice Assistant Listening Control:**
 By default, I will NOT keep listening after your response, even if you ask a question.
 If you want me to continue listening for the user's response (for clarifying questions or follow-ups),
-include the marker {CONTINUE_LISTENING_MARKER} anywhere in your response. This marker will be removed
-before the response is spoken.
+include the marker {CONTINUE_LISTENING_MARKER} anywhere in your response. The marker will be removed
+before the response is spoken, and if your response doesn't end with a question mark, one will be added automatically.
 
 Example:
 - "What temperature would you like?" -> Stops listening
-- "What temperature would you like? {CONTINUE_LISTENING_MARKER}" -> Continues listening
+- "What temperature would you like {CONTINUE_LISTENING_MARKER}" -> Continues listening (? preserved)
+- "I need more information {CONTINUE_LISTENING_MARKER}" -> "I need more information?" (? added, continues listening)
 
 Only use the marker when you genuinely need user input to proceed."""
 
