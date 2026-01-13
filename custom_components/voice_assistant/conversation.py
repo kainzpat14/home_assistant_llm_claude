@@ -306,8 +306,9 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
             _LOGGER.debug("Streaming iteration %d starting", iteration + 1)
 
             accumulated_content = ""
+            yielded_content = ""  # Track what we've actually yielded (without marker)
             tool_calls = None
-            has_listening_marker = False
+            marker_found = False
 
             # Stream from LLM and accumulate
             _LOGGER.debug("Starting to stream chunks from LLM provider")
@@ -316,20 +317,28 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                     _LOGGER.debug("Received chunk: %r (length: %d)", chunk.content, len(chunk.content))
                     accumulated_content += chunk.content
 
-                    # Check for listening marker in this chunk
-                    if CONTINUE_LISTENING_MARKER in chunk.content:
-                        has_listening_marker = True
-                        _LOGGER.info("*** FOUND CONTINUE_LISTENING MARKER in chunk! ***")
-                        # Remove marker from chunk before yielding
-                        processed_chunk = chunk.content.replace(CONTINUE_LISTENING_MARKER, "")
-                        _LOGGER.debug("Processed chunk after removing marker: %r", processed_chunk)
-                        if processed_chunk:  # Only yield if there's content left
-                            yield {"content": processed_chunk}
-                        _LOGGER.debug("Found and removed CONTINUE_LISTENING marker in streaming chunk")
-                    else:
-                        # Yield content delta as-is
-                        _LOGGER.debug("No marker in chunk, yielding as-is")
+                    # Check if marker appears in accumulated content
+                    # (handles marker split across chunks)
+                    if CONTINUE_LISTENING_MARKER in accumulated_content and not marker_found:
+                        marker_found = True
+                        _LOGGER.info("*** FOUND CONTINUE_LISTENING MARKER (in accumulated content)! ***")
+
+                        # Remove marker from accumulated content to get clean version
+                        clean_accumulated = accumulated_content.replace(CONTINUE_LISTENING_MARKER, "")
+
+                        # Calculate what new content to yield: clean accumulated minus what we already yielded
+                        new_content = clean_accumulated[len(yielded_content):]
+
+                        if new_content:
+                            yield {"content": new_content}
+                            yielded_content = clean_accumulated
+                            _LOGGER.debug("Yielded new content with marker removed: %r", new_content)
+                    elif not marker_found:
+                        # No marker yet, yield chunk as-is
                         yield {"content": chunk.content}
+                        yielded_content += chunk.content
+                        _LOGGER.debug("No marker detected yet, yielding chunk as-is")
+                    # If marker already found and removed, don't yield anything more
 
                 if chunk.is_final and chunk.tool_calls:
                     tool_calls = chunk.tool_calls
@@ -337,7 +346,7 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
 
             _LOGGER.debug("Finished streaming, accumulated content length: %d", len(accumulated_content))
             _LOGGER.debug("Full accumulated content: %r", accumulated_content[:200] + "..." if len(accumulated_content) > 200 else accumulated_content)
-            _LOGGER.debug("Has listening marker: %s", has_listening_marker)
+            _LOGGER.debug("Marker found: %s", marker_found)
 
             # If no tool calls, we're done
             if not tool_calls:
@@ -345,7 +354,7 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                 original_content_holder.append(accumulated_content)
 
                 # If marker was present, ensure response ends with ?
-                if has_listening_marker:
+                if marker_found:
                     # Remove marker from accumulated content for checking
                     clean_content = accumulated_content.replace(CONTINUE_LISTENING_MARKER, "").strip()
                     if not clean_content.endswith("?"):
