@@ -75,17 +75,29 @@ def add_listening_instructions_to_prompt(system_prompt: str) -> str:
     """
     listening_instructions = f"""
 
-**Voice Assistant Listening Control:**
-By default, I will NOT keep listening after your response, even if you ask a question.
-If you want me to continue listening for the user's response (for clarifying questions or follow-ups),
-include the marker {CONTINUE_LISTENING_MARKER} anywhere in your response. The marker will be removed
-before the response is spoken, and if your response doesn't end with a question mark, one will be added automatically.
+**CRITICAL: Voice Assistant Listening Control**
 
-Example:
-- "What temperature would you like?" -> Stops listening
-- "What temperature would you like {CONTINUE_LISTENING_MARKER}" -> Continues listening (? preserved)
-- "I need more information {CONTINUE_LISTENING_MARKER}" -> "I need more information?" (? added, continues listening)
+This is a VOICE assistant. By default, I will STOP listening after your response, even if you ask a question.
 
-Only use the marker when you genuinely need user input to proceed."""
+**When to use {CONTINUE_LISTENING_MARKER}:**
+You MUST include this marker when:
+- Playing games (riddles, 20 questions, trivia, etc.)
+- Asking questions that require user input to proceed
+- Having multi-turn interactions or conversations
+- Requesting clarifications or confirmations
+- Any scenario where you're waiting for the user's response
+
+**How it works:**
+- Add {CONTINUE_LISTENING_MARKER} anywhere in your response
+- The marker will be removed before speaking
+- If your response doesn't end with "?", one will be added automatically
+
+**Examples:**
+✓ "Here's a riddle: What gets wetter as it dries? {CONTINUE_LISTENING_MARKER}"
+✓ "Would you like me to turn on the lights? {CONTINUE_LISTENING_MARKER}"
+✓ "What temperature would you like? {CONTINUE_LISTENING_MARKER}"
+✗ "Here's a riddle: What gets wetter as it dries?" (I will NOT hear the answer!)
+
+**Remember:** Without the marker, the user cannot respond to your questions!"""
 
     return system_prompt + listening_instructions
