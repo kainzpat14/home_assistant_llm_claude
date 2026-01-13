@@ -28,6 +28,7 @@ from .const import (
     CONF_PROVIDER,
     CONF_SYSTEM_PROMPT,
     CONF_TEMPERATURE,
+    CONTINUE_LISTENING_MARKER,
     DEFAULT_AUTO_CONTINUE_LISTENING,
     DEFAULT_CONVERSATION_TIMEOUT,
     DEFAULT_ENABLE_FACT_LEARNING,
@@ -259,23 +260,22 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
             user_input: The user input.
             session: The conversation session for tracking.
         """
-        # Accumulate full response for session tracking
-        full_response = ""
+        # Container to receive original content from generator
+        original_content_holder = []
 
         # Use async_add_delta_content_stream to handle streaming
         async for content_obj in chat_log.async_add_delta_content_stream(
             self.entity_id,
             self._stream_response_with_tools(
-                messages, current_tools, tool_manager, chat_log, user_input
+                messages, current_tools, tool_manager, chat_log, user_input, original_content_holder
             ),
         ):
-            # Accumulate content for session tracking
-            if hasattr(content_obj, "content") and content_obj.content:
-                full_response += content_obj.content
+            pass  # Generator handles all streaming internally
 
-        # Track assistant message in session for fact learning
-        if full_response:
-            session.add_message("assistant", full_response)
+        # Track ORIGINAL assistant message in session for fact learning (preserves marker for context)
+        if original_content_holder:
+            original_response = original_content_holder[0]
+            session.add_message("assistant", original_response)
 
     async def _stream_response_with_tools(
         self,
@@ -284,6 +284,7 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         tool_manager: LLMToolManager,
         chat_log: ChatLog,
         user_input: conversation.ConversationInput,
+        original_content_holder: list[str],
     ) -> AsyncIterator[dict[str, Any]]:
         """Stream LLM response with tool call handling.
 
@@ -296,6 +297,7 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
             tool_manager: The tool manager.
             chat_log: The chat log.
             user_input: The user input.
+            original_content_holder: List to store original accumulated content.
 
         Yields:
             Delta dictionaries with "content" key.
@@ -305,22 +307,41 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
 
             accumulated_content = ""
             tool_calls = None
+            has_listening_marker = False
 
             # Stream from LLM and accumulate
-            # Note: We yield chunks immediately for real-time streaming
             async for chunk in self.provider.generate_stream_with_tools(messages, current_tools):
                 if chunk.content:
                     accumulated_content += chunk.content
-                    # Yield content delta immediately for streaming
-                    yield {"content": chunk.content}
+
+                    # Check for listening marker in this chunk
+                    if CONTINUE_LISTENING_MARKER in chunk.content:
+                        has_listening_marker = True
+                        # Remove marker from chunk before yielding
+                        processed_chunk = chunk.content.replace(CONTINUE_LISTENING_MARKER, "")
+                        if processed_chunk:  # Only yield if there's content left
+                            yield {"content": processed_chunk}
+                        _LOGGER.debug("Found and removed CONTINUE_LISTENING marker in streaming chunk")
+                    else:
+                        # Yield content delta as-is
+                        yield {"content": chunk.content}
+
                 if chunk.is_final and chunk.tool_calls:
                     tool_calls = chunk.tool_calls
 
-            # If no tool calls, we're done (content already streamed)
-            # Note: For streaming, listening control via response processing doesn't work well
-            # because content is already streamed. The marker/auto-continue setting in prompt
-            # is the primary control mechanism for streaming mode.
+            # If no tool calls, we're done
             if not tool_calls:
+                # Store original accumulated content for session tracking
+                original_content_holder.append(accumulated_content)
+
+                # If marker was present, ensure response ends with ?
+                if has_listening_marker:
+                    # Remove marker from accumulated content for checking
+                    clean_content = accumulated_content.replace(CONTINUE_LISTENING_MARKER, "").strip()
+                    if not clean_content.endswith("?"):
+                        yield {"content": "?"}
+                        _LOGGER.debug("Added question mark after streaming (CONTINUE_LISTENING marker present)")
+
                 _LOGGER.debug("No tool calls, streaming complete")
                 return
 
@@ -462,6 +483,10 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                     })
 
         # Max iterations reached
+        # Store whatever content we accumulated for session tracking
+        if accumulated_content:
+            original_content_holder.append(accumulated_content)
+
         _LOGGER.warning("Hit max streaming iterations (%d)", MAX_TOOL_ITERATIONS)
         yield {"content": "I encountered an issue processing your request."}
 
