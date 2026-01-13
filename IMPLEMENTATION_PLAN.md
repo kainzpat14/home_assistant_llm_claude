@@ -1002,6 +1002,169 @@ async def _async_handle_message(self, user_input, chat_log) -> conversation.Conv
 
 ---
 
+## Feature 4: Music Assistant Web API Integration
+
+### Overview
+Add support for controlling Music Assistant via its Web API, since it cannot be controlled through Home Assistant's native tools/services.
+
+### Current State
+- Home Assistant tools only expose native HA services
+- Music Assistant has its own Web API that needs to be accessed separately
+- No way to control Music Assistant through the voice assistant
+
+### Requirements
+- **query_tools should return Music Assistant API calls** in addition to regular HA tools
+- Music Assistant API calls should be formatted as tool definitions
+- LLM should be able to discover and call Music Assistant endpoints
+- Support common operations: play music, control playback, search, queue management
+
+### Implementation Strategy
+
+#### Approach: Extend query_tools to include Music Assistant API
+
+1. **Music Assistant API Discovery**:
+   - Connect to Music Assistant Web API (typically on same host as HA)
+   - Query available endpoints and capabilities
+   - Convert API endpoints to tool definitions
+
+2. **Tool Definition Format**:
+   ```python
+   {
+       "type": "function",
+       "function": {
+           "name": "music_assistant_play",
+           "description": "Play music on Music Assistant",
+           "parameters": {
+               "type": "object",
+               "properties": {
+                   "uri": {"type": "string", "description": "URI of media to play"},
+                   "player_id": {"type": "string", "description": "ID of player to use"},
+               },
+               "required": ["uri", "player_id"]
+           }
+       }
+   }
+   ```
+
+3. **API Call Execution**:
+   - Intercept Music Assistant tool calls (like we do for meta-tools)
+   - Make HTTP requests to Music Assistant Web API
+   - Return results to LLM
+   - Log execution for debugging
+
+### Implementation Steps
+
+#### Step 4.1: Add Music Assistant Configuration
+**File:** `custom_components/voice_assistant/const.py`
+
+```python
+# Music Assistant settings
+CONF_MUSIC_ASSISTANT_URL = "music_assistant_url"
+CONF_ENABLE_MUSIC_ASSISTANT = "enable_music_assistant"
+
+DEFAULT_MUSIC_ASSISTANT_URL = "http://localhost:8095"  # Default MA port
+DEFAULT_ENABLE_MUSIC_ASSISTANT = True
+```
+
+#### Step 4.2: Create Music Assistant API Client
+**File:** `custom_components/voice_assistant/music_assistant_client.py` (new file)
+
+- Connect to Music Assistant Web API
+- Discover available endpoints
+- Generate tool definitions from API schema
+- Execute API calls with proper authentication
+- Handle errors and return results
+
+#### Step 4.3: Update query_tools Handler
+**File:** `custom_components/voice_assistant/conversation.py`
+
+Modify `_handle_query_tools` to:
+1. Get regular HA tools (existing functionality)
+2. If Music Assistant is enabled, get MA tool definitions
+3. Merge both sets of tools
+4. Return combined list to LLM
+
+#### Step 4.4: Handle Music Assistant Tool Calls
+**File:** `custom_components/voice_assistant/conversation.py`
+
+In tool processing loop:
+- Detect Music Assistant tool calls (by name prefix or separate list)
+- Execute via Music Assistant API client
+- Return results like meta-tools (not through HA's tool system)
+
+#### Step 4.5: Add Configuration Option
+**File:** `custom_components/voice_assistant/config_flow.py`
+
+Add to options form:
+```python
+vol.Optional(
+    CONF_ENABLE_MUSIC_ASSISTANT,
+    default=self.config_entry.options.get(
+        CONF_ENABLE_MUSIC_ASSISTANT, DEFAULT_ENABLE_MUSIC_ASSISTANT
+    ),
+): bool,
+
+vol.Optional(
+    CONF_MUSIC_ASSISTANT_URL,
+    default=self.config_entry.options.get(
+        CONF_MUSIC_ASSISTANT_URL, DEFAULT_MUSIC_ASSISTANT_URL
+    ),
+): str,
+```
+
+### Example Tool Definitions
+
+Music Assistant tools that should be exposed:
+
+1. **music_assistant_play** - Play media by URI
+2. **music_assistant_pause** - Pause playback
+3. **music_assistant_stop** - Stop playback
+4. **music_assistant_next** - Skip to next track
+5. **music_assistant_previous** - Go to previous track
+6. **music_assistant_search** - Search for music
+7. **music_assistant_get_players** - List available players
+8. **music_assistant_set_volume** - Set player volume
+9. **music_assistant_queue_add** - Add item to queue
+
+### Testing Checklist
+- [ ] Music Assistant API client can connect and discover endpoints
+- [ ] query_tools returns both HA tools and Music Assistant tools
+- [ ] LLM can discover Music Assistant tools via query_tools
+- [ ] Music Assistant tool calls execute successfully
+- [ ] Errors are handled gracefully (MA offline, etc.)
+- [ ] Configuration options work correctly
+- [ ] Can control music playback via voice commands
+
+### Technical Considerations
+
+**API Authentication:**
+- Music Assistant may require authentication
+- Store API key/token in config if needed
+
+**Error Handling:**
+- Handle Music Assistant being offline/unreachable
+- Return helpful error messages to LLM
+- Don't break other tool functionality if MA fails
+
+**Tool Namespace:**
+- Prefix MA tools with `music_assistant_` to avoid conflicts
+- Make it clear to LLM which tools are for Music Assistant
+
+**Performance:**
+- Cache Music Assistant tool definitions (don't query API every time)
+- Only refresh when query_tools is called with domain filter or on config change
+
+---
+
+## Implementation Order Recommendation
+
+1. **Voice Assistant Listening Control** (Feature 3) ✅ COMPLETED
+2. **Conversation History Management** (Feature 2) ✅ COMPLETED
+3. **Streaming Response Support** (Feature 1) ✅ COMPLETED
+4. **Music Assistant Web API Integration** (Feature 4) - **NEXT**
+
+---
+
 ## Files to Create/Modify Summary
 
 ### New Files
