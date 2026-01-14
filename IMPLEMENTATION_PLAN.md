@@ -1,9 +1,10 @@
 # Implementation Plan for Voice Assistant Features
 
-This document provides detailed implementation instructions for three features:
+This document provides detailed implementation instructions for four features:
 1. Streaming Response Support
 2. Conversation History Management with Timeout
 3. Voice Assistant Listening Control
+4. Music Assistant Integration
 
 ---
 
