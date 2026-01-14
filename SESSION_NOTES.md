@@ -320,15 +320,39 @@ All features can be configured via integration options:
 - **Listening control**: Prevent auto-listening after responses ending with `?`
 - **Configuration option**: `auto_continue_listening` (default: False)
 - **LLM marker**: `[CONTINUE_LISTENING]` for explicit listening requests
-- **Response processing**: Replaces `?` with fullwidth `？` in non-streaming mode
+- **Chunk buffering**: Prevents marker from being spoken even when split across chunks
 - **Prompt instructions**: Automatically added when feature is enabled
 
 **How It Works:**
 - Default behavior: Voice assistant stops after response, even with `?`
 - LLM can include `[CONTINUE_LISTENING]` marker to request listening
-- Marker is removed from spoken response
+- Marker is removed from spoken response via chunk buffering
 - Non-streaming: Response processed to replace final `?`
-- Streaming: LLM follows prompt instructions to use marker when needed
+- Streaming: Chunk buffer holds partial markers until complete
+
+**Critical Implementation Detail - Chunk Buffering:**
+The marker is often split character-by-character across streaming chunks:
+```
+' [' → 'CONT' → 'INUE' → '_LIST' → 'EN' → 'ING' → ']'
+```
+
+Solution: Buffer chunks and check for partial marker prefixes
+```python
+def _buffer_might_contain_partial_marker(self, buffer: str) -> bool:
+    # Check if buffer ends with any prefix: "[", "[C", "[CO", "[CON", etc.
+    for i in range(1, len(marker)):
+        if buffer.endswith(marker[:i]):
+            return True  # HOLD - don't yield yet
+    return False  # Safe to yield
+```
+
+**Buffering Logic:**
+1. If marker complete in buffer → Remove and yield clean content
+2. If buffer ends with partial marker → HOLD (don't yield)
+3. If buffer safe (no partial marker) → Yield immediately
+4. At stream end → Yield remaining buffer
+
+This ensures marker NEVER reaches chat_log, preventing it from being spoken.
 
 **Configuration:**
 - `auto_continue_listening=False` (default): Controlled listening
