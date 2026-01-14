@@ -207,7 +207,7 @@ When testing conversation memory:
 - Check logs: should see "chat_log has N content items" where N > 2
 - Should see previous user and assistant messages being added
 
-## Future Implementation Notes
+## Implementation Notes
 
 ### Streaming Support ✅ COMPLETED
 

@@ -15,9 +15,9 @@ This integration takes a unique approach to voice assistance in Home Assistant:
 ## Supported LLM Providers
 
 ### Currently Available
-- **Groq**: Fast inference with open-source models
+- **Groq**: Fast inference with open-source models (with streaming and tool calling)
 
-### Coming Soon
+### Planned
 - OpenAI (GPT-4, GPT-3.5)
 - Anthropic (Claude)
 - Local LLMs (Ollama, llama.cpp)
@@ -46,28 +46,21 @@ This integration takes a unique approach to voice assistance in Home Assistant:
 
 ## Development Status
 
-⚠️ **This integration is currently in active development and should not be used in production.**
+✅ **Core features are complete and tested.**
 
-**✅ Recently Completed:**
-- Complete integration structure
-- Configuration flow with API key validation
-- Provider abstraction layer
-- Groq provider with tool calling support
-- Conversation agent with memory
-- Dynamic tool discovery and execution
-- Home Assistant API integration via native LLM API
-- Chat log integration for conversation history
-- System prompt customization
-
-**🔧 In Progress:**
-- Testing and bug fixes
-- Streaming response support
-- Documentation and user guides
+**✅ Completed Features:**
+- Complete integration structure with configuration flow
+- Groq provider with tool calling and streaming support
+- Conversation agent with full Home Assistant integration
+- Streaming responses via Home Assistant's delta function
+- Conversation history with global session and configurable timeout
+- Fact learning system (learn_fact, query_facts, automatic extraction)
+- Voice assistant listening control with `[CONTINUE_LISTENING]` marker
+- Music Assistant integration for voice-controlled music playback
 
 **⏳ Planned:**
 - Additional LLM providers (OpenAI, Anthropic, local LLMs)
 - Public release via HACS
-- Advanced customization options
 
 ## Need Help?
 
