@@ -16,6 +16,7 @@ from .const import (
     CONF_AUTO_CONTINUE_LISTENING,
     CONF_CONVERSATION_TIMEOUT,
     CONF_ENABLE_FACT_LEARNING,
+    CONF_ENABLE_MUSIC_ASSISTANT,
     CONF_ENABLE_STREAMING,
     CONF_LLM_HASS_API,
     CONF_MAX_TOKENS,
@@ -25,6 +26,7 @@ from .const import (
     DEFAULT_AUTO_CONTINUE_LISTENING,
     DEFAULT_CONVERSATION_TIMEOUT,
     DEFAULT_ENABLE_FACT_LEARNING,
+    DEFAULT_ENABLE_MUSIC_ASSISTANT,
     DEFAULT_ENABLE_STREAMING,
     DEFAULT_MAX_TOKENS,
     DEFAULT_MODELS,
@@ -196,6 +198,12 @@ class VoiceAssistantOptionsFlow(OptionsFlow):
                         CONF_AUTO_CONTINUE_LISTENING,
                         default=self.config_entry.options.get(
                             CONF_AUTO_CONTINUE_LISTENING, DEFAULT_AUTO_CONTINUE_LISTENING
+                        ),
+                    ): bool,
+                    vol.Optional(
+                        CONF_ENABLE_MUSIC_ASSISTANT,
+                        default=self.config_entry.options.get(
+                            CONF_ENABLE_MUSIC_ASSISTANT, DEFAULT_ENABLE_MUSIC_ASSISTANT
                         ),
                     ): bool,
                 }

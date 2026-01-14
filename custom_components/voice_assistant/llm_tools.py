@@ -79,6 +79,161 @@ LEARN_FACT_DEFINITION = {
     },
 }
 
+# Music Assistant meta-tools
+PLAY_MUSIC_DEFINITION = {
+    "type": "function",
+    "function": {
+        "name": "play_music",
+        "description": "Play music on a Music Assistant player. Use this for any music playback requests. Searches automatically if exact match not found. Supports artists, albums, tracks, playlists, and radio stations.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "What to play: artist name, album, track title, playlist, or combined (e.g., 'Queen', 'Bohemian Rhapsody', 'Queen - Innuendo')",
+                },
+                "media_type": {
+                    "type": "string",
+                    "description": "Type of media to search for",
+                    "enum": ["track", "album", "artist", "playlist", "radio"],
+                },
+                "player": {
+                    "type": "string",
+                    "description": "Where to play: room name or player entity_id (e.g., 'living room', 'kitchen', 'media_player.ma_bedroom'). If not specified, uses default or first available player.",
+                },
+                "enqueue": {
+                    "type": "string",
+                    "description": "How to add to queue",
+                    "enum": ["play", "replace", "next", "add"],
+                    "default": "replace",
+                },
+                "radio_mode": {
+                    "type": "boolean",
+                    "description": "Enable radio mode to auto-generate similar tracks after selection finishes",
+                    "default": False,
+                },
+            },
+            "required": ["query"],
+        },
+    },
+}
+
+GET_NOW_PLAYING_DEFINITION = {
+    "type": "function",
+    "function": {
+        "name": "get_now_playing",
+        "description": "Get information about what's currently playing on Music Assistant players. Returns track name, artist, album, and playback state.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "player": {
+                    "type": "string",
+                    "description": "Specific player to check (room name or entity_id). If not specified, returns info for all active players.",
+                },
+            },
+            "required": [],
+        },
+    },
+}
+
+CONTROL_PLAYBACK_DEFINITION = {
+    "type": "function",
+    "function": {
+        "name": "control_playback",
+        "description": "Control music playback: play, pause, stop, skip, previous, volume. Use for playback control commands.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "description": "Playback control action",
+                    "enum": ["play", "pause", "stop", "next", "previous", "volume_up", "volume_down", "volume_set", "shuffle", "repeat"],
+                },
+                "player": {
+                    "type": "string",
+                    "description": "Target player (room name or entity_id). If not specified, controls first active player.",
+                },
+                "volume_level": {
+                    "type": "number",
+                    "description": "Volume level 0-100 (only for volume_set action)",
+                    "minimum": 0,
+                    "maximum": 100,
+                },
+            },
+            "required": ["action"],
+        },
+    },
+}
+
+SEARCH_MUSIC_DEFINITION = {
+    "type": "function",
+    "function": {
+        "name": "search_music",
+        "description": "Search the music library and streaming providers. Use when user wants to know what music is available or browse the library.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query: artist, album, track name, or genre",
+                },
+                "media_type": {
+                    "type": "string",
+                    "description": "Filter by media type",
+                    "enum": ["track", "album", "artist", "playlist", "radio"],
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum results to return",
+                    "default": 10,
+                    "maximum": 50,
+                },
+                "favorites_only": {
+                    "type": "boolean",
+                    "description": "Only search in favorites/library",
+                    "default": False,
+                },
+            },
+            "required": ["query"],
+        },
+    },
+}
+
+TRANSFER_MUSIC_DEFINITION = {
+    "type": "function",
+    "function": {
+        "name": "transfer_music",
+        "description": "Transfer music playback from one room/player to another. Use when user wants music to follow them or move to a different room.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "target_player": {
+                    "type": "string",
+                    "description": "Where to move the music (room name or entity_id)",
+                },
+                "source_player": {
+                    "type": "string",
+                    "description": "Where to move music from. If not specified, uses first active player.",
+                },
+            },
+            "required": ["target_player"],
+        },
+    },
+}
+
+GET_MUSIC_PLAYERS_DEFINITION = {
+    "type": "function",
+    "function": {
+        "name": "get_music_players",
+        "description": "Get list of available Music Assistant players and their current state. Use to discover which rooms/speakers are available for music playback.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+}
+
 
 class LLMToolManager:
     """Manager for dynamic LLM tool discovery using chat_log."""
@@ -233,10 +388,25 @@ class LLMToolManager:
             return {"success": False, "error": str(err)}
 
     @staticmethod
-    def get_initial_tools() -> list[dict[str, Any]]:
+    def get_initial_tools(include_music: bool = False) -> list[dict[str, Any]]:
         """Get initial meta-tools available to the LLM.
 
+        Args:
+            include_music: Whether to include Music Assistant tools.
+
         Returns:
-            List with query_tools, query_facts, and learn_fact definitions.
+            List with query_tools, query_facts, learn_fact, and optionally music tools.
         """
-        return [QUERY_TOOLS_DEFINITION, QUERY_FACTS_DEFINITION, LEARN_FACT_DEFINITION]
+        tools = [QUERY_TOOLS_DEFINITION, QUERY_FACTS_DEFINITION, LEARN_FACT_DEFINITION]
+
+        if include_music:
+            tools.extend([
+                PLAY_MUSIC_DEFINITION,
+                GET_NOW_PLAYING_DEFINITION,
+                CONTROL_PLAYBACK_DEFINITION,
+                SEARCH_MUSIC_DEFINITION,
+                TRANSFER_MUSIC_DEFINITION,
+                GET_MUSIC_PLAYERS_DEFINITION,
+            ])
+
+        return tools

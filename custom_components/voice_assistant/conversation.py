@@ -21,6 +21,7 @@ from .const import (
     CONF_AUTO_CONTINUE_LISTENING,
     CONF_CONVERSATION_TIMEOUT,
     CONF_ENABLE_FACT_LEARNING,
+    CONF_ENABLE_MUSIC_ASSISTANT,
     CONF_ENABLE_STREAMING,
     CONF_LLM_HASS_API,
     CONF_MAX_TOKENS,
@@ -32,6 +33,7 @@ from .const import (
     DEFAULT_AUTO_CONTINUE_LISTENING,
     DEFAULT_CONVERSATION_TIMEOUT,
     DEFAULT_ENABLE_FACT_LEARNING,
+    DEFAULT_ENABLE_MUSIC_ASSISTANT,
     DEFAULT_ENABLE_STREAMING,
     DEFAULT_MAX_TOKENS,
     DEFAULT_SYSTEM_PROMPT,
@@ -41,6 +43,7 @@ from .const import (
 from .conversation_manager import ConversationManager
 from .llm import create_llm_provider
 from .llm.base import StreamChunk
+from .music_assistant import MusicAssistantHandler
 from .response_processor import (
     add_listening_instructions_to_prompt,
     process_response_for_listening,
@@ -85,6 +88,9 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
             timeout_seconds=self._get_config(CONF_CONVERSATION_TIMEOUT, DEFAULT_CONVERSATION_TIMEOUT),
         )
 
+        # Initialize Music Assistant handler
+        self._music_handler: MusicAssistantHandler | None = None
+
     def _get_config(self, key: str, default: Any = None) -> Any:
         """Get config value from options (preferred) or data (fallback).
 
@@ -109,6 +115,13 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                 max_tokens=self._get_config(CONF_MAX_TOKENS, DEFAULT_MAX_TOKENS),
             )
         return self._provider
+
+    @property
+    def music_handler(self) -> MusicAssistantHandler:
+        """Get or create the Music Assistant handler."""
+        if self._music_handler is None:
+            self._music_handler = MusicAssistantHandler(self.hass)
+        return self._music_handler
 
     @property
     def supported_languages(self) -> list[str] | Literal["*"]:
@@ -178,8 +191,14 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         # Create tool manager with access to chat_log's llm_api
         tool_manager = LLMToolManager(chat_log)
 
-        # Start with only query_tools - LLM will request more if needed
-        current_tools = LLMToolManager.get_initial_tools()
+        # Check if Music Assistant is enabled and available
+        include_music = (
+            self._get_config(CONF_ENABLE_MUSIC_ASSISTANT, DEFAULT_ENABLE_MUSIC_ASSISTANT)
+            and self.music_handler.is_available()
+        )
+
+        # Start with meta-tools (optionally including music tools)
+        current_tools = LLMToolManager.get_initial_tools(include_music=include_music)
 
         # Build messages from chat_log content and add system prompt
         messages = self._build_messages(
@@ -373,10 +392,11 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
             # Handle tool calls (not streamed to user)
             _LOGGER.info("Processing %d tool call(s) in iteration %d", len(tool_calls), iteration + 1)
 
-            # Separate meta-tools (query_tools, query_facts, learn_fact) from HA tools
+            # Separate meta-tools (query_tools, query_facts, learn_fact, music) from HA tools
             query_tools_calls = []
             query_facts_calls = []
             learn_fact_calls = []
+            music_tool_calls = []
             ha_tool_calls = []
 
             for tool_call in tool_calls:
@@ -387,6 +407,9 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                     query_facts_calls.append(tool_call)
                 elif tool_name == "learn_fact":
                     learn_fact_calls.append(tool_call)
+                elif tool_name in ["play_music", "get_now_playing", "control_playback",
+                                     "search_music", "transfer_music", "get_music_players"]:
+                    music_tool_calls.append(tool_call)
                 else:
                     ha_tool_calls.append(tool_call)
 
@@ -480,6 +503,32 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                     summary_content = AssistantContent(
                         agent_id=DOMAIN,
                         content="\n".join(learn_fact_summary),
+                    )
+                    chat_log.async_add_assistant_content_without_tools(summary_content)
+
+            # Handle music tools
+            if music_tool_calls:
+                music_summary = []
+                for tool_call in music_tool_calls:
+                    tool_name = tool_call["function"]["name"]
+                    arguments = json.loads(tool_call["function"]["arguments"])
+                    _LOGGER.info("Handling music tool %s: %s", tool_name, arguments)
+
+                    result = await self._handle_music_tool(tool_name, arguments)
+
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "content": json.dumps(result),
+                    })
+
+                    if result.get("success"):
+                        music_summary.append(result.get("message", f"Executed {tool_name}"))
+
+                if music_summary:
+                    summary_content = AssistantContent(
+                        agent_id=DOMAIN,
+                        content="\n".join(music_summary),
                     )
                     chat_log.async_add_assistant_content_without_tools(summary_content)
 
@@ -592,10 +641,11 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
             tool_calls = response["tool_calls"]
             _LOGGER.info("Received %d tool call(s) in iteration %d", len(tool_calls), iteration + 1)
 
-            # Separate meta-tools (query_tools, query_facts, learn_fact) from real HA tools
+            # Separate meta-tools (query_tools, query_facts, learn_fact, music) from real HA tools
             query_tools_calls = []
             query_facts_calls = []
             learn_fact_calls = []
+            music_tool_calls = []
             ha_tool_calls = []
 
             for tool_call in tool_calls:
@@ -606,6 +656,9 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                     query_facts_calls.append(tool_call)
                 elif tool_name == "learn_fact":
                     learn_fact_calls.append(tool_call)
+                elif tool_name in ["play_music", "get_now_playing", "control_playback",
+                                     "search_music", "transfer_music", "get_music_players"]:
+                    music_tool_calls.append(tool_call)
                 else:
                     ha_tool_calls.append(tool_call)
 
@@ -713,6 +766,36 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                     )
                     chat_log.async_add_assistant_content_without_tools(summary_content)
                     _LOGGER.debug("Added learn_fact summary to chat_log")
+
+            # Handle music tools locally (not in chat_log - they're internal meta-tools)
+            if music_tool_calls:
+                music_summary = []
+                for tool_call in music_tool_calls:
+                    tool_name = tool_call["function"]["name"]
+                    arguments = json.loads(tool_call["function"]["arguments"])
+                    _LOGGER.info("Handling music tool %s with args: %s", tool_name, arguments)
+
+                    result = await self._handle_music_tool(tool_name, arguments)
+
+                    # Add result to messages for LLM
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "content": json.dumps(result),
+                    })
+
+                    # Build summary for chat_log
+                    if result.get("success"):
+                        music_summary.append(result.get("message", f"Executed {tool_name}"))
+
+                # Add a message to chat_log describing what music tools did
+                if music_summary:
+                    summary_content = AssistantContent(
+                        agent_id=DOMAIN,
+                        content="\n".join(music_summary),
+                    )
+                    chat_log.async_add_assistant_content_without_tools(summary_content)
+                    _LOGGER.debug("Added music tool summary to chat_log")
 
             # Handle real HA tools through chat_log
             if ha_tool_calls:
@@ -918,6 +1001,72 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
             return {
                 "success": False,
                 "error": f"Failed to store fact: {err}",
+            }
+
+    async def _handle_music_tool(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Handle music assistant meta-tool calls.
+
+        Args:
+            tool_name: Name of the music tool.
+            arguments: Tool arguments.
+
+        Returns:
+            Result dictionary.
+        """
+        handler = self.music_handler
+
+        try:
+            if tool_name == "play_music":
+                return await handler.play_music(
+                    query=arguments.get("query", ""),
+                    player=arguments.get("player"),
+                    media_type=arguments.get("media_type"),
+                    enqueue=arguments.get("enqueue", "replace"),
+                    radio_mode=arguments.get("radio_mode", False),
+                )
+            elif tool_name == "get_now_playing":
+                return await handler.get_now_playing(
+                    player=arguments.get("player"),
+                )
+            elif tool_name == "control_playback":
+                return await handler.control_playback(
+                    action=arguments["action"],
+                    player=arguments.get("player"),
+                    volume_level=arguments.get("volume_level"),
+                )
+            elif tool_name == "search_music":
+                return await handler.search_music(
+                    query=arguments.get("query", ""),
+                    media_type=arguments.get("media_type"),
+                    limit=arguments.get("limit", 10),
+                    favorites_only=arguments.get("favorites_only", False),
+                )
+            elif tool_name == "transfer_music":
+                return await handler.transfer_music(
+                    target_player=arguments["target_player"],
+                    source_player=arguments.get("source_player"),
+                )
+            elif tool_name == "get_music_players":
+                players = await handler.get_players()
+                return {
+                    "success": True,
+                    "players": players,
+                    "message": f"Found {len(players)} Music Assistant player(s)",
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": f"Unknown music tool: {tool_name}",
+                }
+        except Exception as err:
+            _LOGGER.error("Error handling music tool %s: %s", tool_name, err)
+            return {
+                "success": False,
+                "error": str(err),
             }
 
     def _build_messages(

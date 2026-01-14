@@ -31,14 +31,24 @@
           "model": "Model",
           "llm_hass_api": "Home Assistant API",
           "temperature": "Temperature",
-          "max_tokens": "Max Tokens"
+          "max_tokens": "Max Tokens",
+          "enable_streaming": "Enable Streaming",
+          "conversation_timeout": "Conversation Timeout (seconds)",
+          "enable_fact_learning": "Enable Fact Learning",
+          "auto_continue_listening": "Auto-continue Listening",
+          "enable_music_assistant": "Enable Music Assistant"
         },
         "data_description": {
           "provider": "Select the LLM provider to use",
           "model": "The model identifier to use",
           "llm_hass_api": "Select which Home Assistant API to expose to the LLM for device control (optional)",
           "temperature": "Controls response creativity (0.0-1.0)",
-          "max_tokens": "Maximum number of tokens in responses"
+          "max_tokens": "Maximum number of tokens in responses",
+          "enable_streaming": "Stream responses in real-time for faster voice feedback",
+          "conversation_timeout": "How long to keep conversation history before starting fresh (in seconds)",
+          "enable_fact_learning": "Automatically learn and remember facts about you from conversations",
+          "auto_continue_listening": "Continue listening after responses ending with '?'",
+          "enable_music_assistant": "Enable voice control for Music Assistant (requires Music Assistant integration)"
         }
       }
     },
