@@ -1031,3 +1031,988 @@ async def _async_handle_message(self, user_input, chat_log) -> conversation.Conv
 4. **Testing**: Test each feature in isolation before combining. Use Home Assistant's developer tools for quick reload testing.
 
 5. **Documentation**: Update README.md with new configuration options after implementation.
+
+---
+
+## Feature 4: Music Assistant Integration
+
+### Overview
+Integrate with Music Assistant to provide intelligent voice control for music playback across the home. This feature enables natural language music commands like "play some jazz in the living room" or "what's playing in the kitchen" by leveraging Music Assistant's Home Assistant services and the existing meta-tool architecture.
+
+### Current State
+- ❌ No Music Assistant support
+- ✅ Existing `query_tools` meta-tool can discover `music_assistant.*` services
+- ✅ Existing architecture supports dynamic tool discovery
+
+### Research Summary
+
+#### Music Assistant Home Assistant Services
+Based on API research ([Music Assistant Integration](https://www.home-assistant.io/integrations/music_assistant/), [Music Assistant API Docs](https://www.music-assistant.io/api/)):
+
+| Service | Purpose | Key Parameters |
+|---------|---------|----------------|
+| `music_assistant.play_media` | Play/enqueue media | `media_id`, `media_type`, `artist`, `album`, `enqueue`, `radio_mode` |
+| `music_assistant.search` | Search library & providers | Query string, returns matches |
+| `music_assistant.get_library` | Query library with filters | `media_type`, `search`, `limit`, `order_by`, `favorite` |
+| `music_assistant.get_queue` | Get queue & current item | `entity_id` → returns `current_item`, queue data |
+| `music_assistant.transfer_queue` | Move queue between players | `source_player`, target entity, `auto_play` |
+| `music_assistant.play_announcement` | Play announcement URL | `url`, `announce_volume`, `use_pre_announce` |
+
+#### Media ID Formats
+The `play_media` action accepts multiple formats:
+- **Name**: "Queen", "Bohemian Rhapsody"
+- **Combined**: "Queen - Innuendo"
+- **URI**: `spotify://artist/12345`
+- **Multiple items**: List format for queuing
+
+#### Enqueue Options
+- `play` - Play immediately
+- `replace` - Replace queue and play
+- `next` - Play next
+- `replace_next` - Replace next item
+- `add` - Add to end of queue
+
+#### Radio Mode
+Generates similar tracks automatically. Requires compatible provider (Spotify, Apple Music, Deezer, Tidal, YouTube Music, Subsonic).
+
+### Architecture Decision
+
+**Option A: Rely on Existing `query_tools`**
+- Pros: No new code, Music Assistant services auto-discovered
+- Cons: LLM needs to understand complex service parameters, no music-specific context
+
+**Option B: Music-Specific Meta-Tools (RECOMMENDED)**
+- Add specialized meta-tools that wrap Music Assistant services
+- Provide music-specific context (available players, current playback state)
+- Simplify complex operations for the LLM
+
+### Implementation Steps
+
+#### Step 4.1: Add Music Assistant Meta-Tool Definitions
+**File:** `custom_components/voice_assistant/llm_tools.py`
+
+Add new meta-tool definitions:
+
+```python
+# Music Assistant meta-tools
+PLAY_MUSIC_DEFINITION = {
+    "type": "function",
+    "function": {
+        "name": "play_music",
+        "description": "Play music on a Music Assistant player. Use this for any music playback requests. Searches automatically if exact match not found. Supports artists, albums, tracks, playlists, and radio stations.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "What to play: artist name, album, track title, playlist, or combined (e.g., 'Queen', 'Bohemian Rhapsody', 'Queen - Innuendo')",
+                },
+                "media_type": {
+                    "type": "string",
+                    "description": "Type of media to search for",
+                    "enum": ["track", "album", "artist", "playlist", "radio"],
+                },
+                "player": {
+                    "type": "string",
+                    "description": "Where to play: room name or player entity_id (e.g., 'living room', 'kitchen', 'media_player.ma_bedroom'). If not specified, uses default or first available player.",
+                },
+                "enqueue": {
+                    "type": "string",
+                    "description": "How to add to queue",
+                    "enum": ["play", "replace", "next", "add"],
+                    "default": "replace",
+                },
+                "radio_mode": {
+                    "type": "boolean",
+                    "description": "Enable radio mode to auto-generate similar tracks after selection finishes",
+                    "default": False,
+                },
+            },
+            "required": ["query"],
+        },
+    },
+}
+
+GET_NOW_PLAYING_DEFINITION = {
+    "type": "function",
+    "function": {
+        "name": "get_now_playing",
+        "description": "Get information about what's currently playing on Music Assistant players. Returns track name, artist, album, and playback state.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "player": {
+                    "type": "string",
+                    "description": "Specific player to check (room name or entity_id). If not specified, returns info for all active players.",
+                },
+            },
+            "required": [],
+        },
+    },
+}
+
+CONTROL_PLAYBACK_DEFINITION = {
+    "type": "function",
+    "function": {
+        "name": "control_playback",
+        "description": "Control music playback: play, pause, stop, skip, previous, volume. Use for playback control commands.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "description": "Playback control action",
+                    "enum": ["play", "pause", "stop", "next", "previous", "volume_up", "volume_down", "volume_set", "shuffle", "repeat"],
+                },
+                "player": {
+                    "type": "string",
+                    "description": "Target player (room name or entity_id). If not specified, controls first active player.",
+                },
+                "volume_level": {
+                    "type": "number",
+                    "description": "Volume level 0-100 (only for volume_set action)",
+                    "minimum": 0,
+                    "maximum": 100,
+                },
+            },
+            "required": ["action"],
+        },
+    },
+}
+
+SEARCH_MUSIC_DEFINITION = {
+    "type": "function",
+    "function": {
+        "name": "search_music",
+        "description": "Search the music library and streaming providers. Use when user wants to know what music is available or browse the library.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query: artist, album, track name, or genre",
+                },
+                "media_type": {
+                    "type": "string",
+                    "description": "Filter by media type",
+                    "enum": ["track", "album", "artist", "playlist", "radio"],
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum results to return",
+                    "default": 10,
+                    "maximum": 50,
+                },
+                "favorites_only": {
+                    "type": "boolean",
+                    "description": "Only search in favorites/library",
+                    "default": False,
+                },
+            },
+            "required": ["query"],
+        },
+    },
+}
+
+TRANSFER_MUSIC_DEFINITION = {
+    "type": "function",
+    "function": {
+        "name": "transfer_music",
+        "description": "Transfer music playback from one room/player to another. Use when user wants music to follow them or move to a different room.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "target_player": {
+                    "type": "string",
+                    "description": "Where to move the music (room name or entity_id)",
+                },
+                "source_player": {
+                    "type": "string",
+                    "description": "Where to move music from. If not specified, uses first active player.",
+                },
+            },
+            "required": ["target_player"],
+        },
+    },
+}
+
+GET_MUSIC_PLAYERS_DEFINITION = {
+    "type": "function",
+    "function": {
+        "name": "get_music_players",
+        "description": "Get list of available Music Assistant players and their current state. Use to discover which rooms/speakers are available for music playback.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+}
+```
+
+#### Step 4.2: Create Music Assistant Handler
+**File:** `custom_components/voice_assistant/music_assistant.py` (new file)
+
+```python
+"""Music Assistant integration for voice control."""
+
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING, Any
+
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
+
+if TYPE_CHECKING:
+    from homeassistant.components.conversation import ChatLog
+
+_LOGGER = logging.getLogger(__name__)
+
+
+class MusicAssistantHandler:
+    """Handler for Music Assistant operations."""
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        """Initialize the Music Assistant handler."""
+        self.hass = hass
+        self._player_cache: dict[str, str] = {}  # Room name -> entity_id mapping
+
+    def is_available(self) -> bool:
+        """Check if Music Assistant integration is available."""
+        return self.hass.services.has_service("music_assistant", "play_media")
+
+    async def get_players(self) -> list[dict[str, Any]]:
+        """Get all Music Assistant player entities with their state."""
+        players = []
+
+        # Get entity registry
+        ent_reg = er.async_get(self.hass)
+
+        # Find all media_player entities that start with ma_ (Music Assistant naming convention)
+        for entity_id in self.hass.states.async_entity_ids("media_player"):
+            state = self.hass.states.get(entity_id)
+            if not state:
+                continue
+
+            # Check if it's a Music Assistant player
+            # MA players typically have "mass" or "music_assistant" in integration
+            entity_entry = ent_reg.async_get(entity_id)
+            is_ma_player = (
+                entity_entry and entity_entry.platform == "music_assistant"
+            ) or entity_id.startswith("media_player.ma_")
+
+            if is_ma_player:
+                friendly_name = state.attributes.get("friendly_name", entity_id)
+                players.append({
+                    "entity_id": entity_id,
+                    "name": friendly_name,
+                    "state": state.state,
+                    "media_title": state.attributes.get("media_title"),
+                    "media_artist": state.attributes.get("media_artist"),
+                    "media_album_name": state.attributes.get("media_album_name"),
+                    "volume_level": state.attributes.get("volume_level"),
+                })
+
+                # Cache room name mapping
+                room_name = self._extract_room_name(friendly_name, entity_id)
+                self._player_cache[room_name.lower()] = entity_id
+
+        return players
+
+    def _extract_room_name(self, friendly_name: str, entity_id: str) -> str:
+        """Extract room name from friendly name or entity_id."""
+        # Try friendly name first
+        if friendly_name:
+            # Remove common suffixes
+            for suffix in [" Speaker", " Player", " MA", " Music"]:
+                if friendly_name.endswith(suffix):
+                    return friendly_name[:-len(suffix)]
+            return friendly_name
+
+        # Fall back to entity_id parsing
+        # media_player.ma_living_room -> living room
+        name = entity_id.replace("media_player.", "").replace("ma_", "")
+        return name.replace("_", " ")
+
+    def resolve_player(self, player_ref: str | None) -> str | None:
+        """Resolve player reference (room name or entity_id) to entity_id.
+
+        Args:
+            player_ref: Room name (e.g., 'living room') or entity_id.
+
+        Returns:
+            Entity ID or None if not found.
+        """
+        if not player_ref:
+            return None
+
+        # Already an entity_id
+        if player_ref.startswith("media_player."):
+            return player_ref
+
+        # Look up in cache
+        normalized = player_ref.lower().strip()
+        if normalized in self._player_cache:
+            return self._player_cache[normalized]
+
+        # Try fuzzy matching
+        for room_name, entity_id in self._player_cache.items():
+            if normalized in room_name or room_name in normalized:
+                return entity_id
+
+        return None
+
+    async def get_first_active_player(self) -> str | None:
+        """Get the first player that is currently playing."""
+        players = await self.get_players()
+        for player in players:
+            if player["state"] == "playing":
+                return player["entity_id"]
+        # Fall back to first available player
+        return players[0]["entity_id"] if players else None
+
+    async def play_music(
+        self,
+        query: str,
+        player: str | None = None,
+        media_type: str | None = None,
+        enqueue: str = "replace",
+        radio_mode: bool = False,
+    ) -> dict[str, Any]:
+        """Play music using Music Assistant.
+
+        Args:
+            query: What to play (artist, album, track, etc.)
+            player: Target player (room name or entity_id)
+            media_type: Type of media (track, album, artist, playlist, radio)
+            enqueue: Queue mode (play, replace, next, add)
+            radio_mode: Enable radio mode
+
+        Returns:
+            Result dictionary with success status and message.
+        """
+        if not self.is_available():
+            return {
+                "success": False,
+                "error": "Music Assistant is not available. Please ensure it's installed and configured.",
+            }
+
+        # Resolve player
+        target_entity = self.resolve_player(player)
+        if not target_entity:
+            target_entity = await self.get_first_active_player()
+
+        if not target_entity:
+            return {
+                "success": False,
+                "error": "No Music Assistant players found. Please check your Music Assistant configuration.",
+            }
+
+        try:
+            service_data = {
+                "media_id": query,
+                "enqueue": enqueue,
+            }
+
+            if media_type:
+                service_data["media_type"] = media_type
+
+            if radio_mode:
+                service_data["radio_mode"] = True
+
+            await self.hass.services.async_call(
+                "music_assistant",
+                "play_media",
+                service_data,
+                target={"entity_id": target_entity},
+            )
+
+            player_name = self._get_player_name(target_entity)
+            return {
+                "success": True,
+                "message": f"Playing '{query}' on {player_name}",
+                "player": target_entity,
+            }
+
+        except Exception as err:
+            _LOGGER.error("Error playing music: %s", err)
+            return {
+                "success": False,
+                "error": f"Failed to play music: {err}",
+            }
+
+    def _get_player_name(self, entity_id: str) -> str:
+        """Get friendly name for a player entity."""
+        state = self.hass.states.get(entity_id)
+        if state:
+            return state.attributes.get("friendly_name", entity_id)
+        return entity_id
+
+    async def get_now_playing(self, player: str | None = None) -> dict[str, Any]:
+        """Get current playback information.
+
+        Args:
+            player: Specific player to check, or None for all active.
+
+        Returns:
+            Currently playing information.
+        """
+        players = await self.get_players()
+
+        if player:
+            target_entity = self.resolve_player(player)
+            players = [p for p in players if p["entity_id"] == target_entity]
+
+        # Filter to only playing players if no specific player requested
+        if not player:
+            active_players = [p for p in players if p["state"] == "playing"]
+            if active_players:
+                players = active_players
+
+        if not players:
+            return {
+                "success": True,
+                "message": "Nothing is currently playing",
+                "players": [],
+            }
+
+        result_players = []
+        for p in players:
+            info = {
+                "player": p["name"],
+                "state": p["state"],
+            }
+            if p["media_title"]:
+                info["track"] = p["media_title"]
+            if p["media_artist"]:
+                info["artist"] = p["media_artist"]
+            if p["media_album_name"]:
+                info["album"] = p["media_album_name"]
+            result_players.append(info)
+
+        return {
+            "success": True,
+            "players": result_players,
+        }
+
+    async def control_playback(
+        self,
+        action: str,
+        player: str | None = None,
+        volume_level: int | None = None,
+    ) -> dict[str, Any]:
+        """Control playback on a player.
+
+        Args:
+            action: Control action (play, pause, stop, next, previous, volume_set, etc.)
+            player: Target player
+            volume_level: Volume level for volume_set action (0-100)
+
+        Returns:
+            Result dictionary.
+        """
+        target_entity = self.resolve_player(player)
+        if not target_entity:
+            target_entity = await self.get_first_active_player()
+
+        if not target_entity:
+            return {
+                "success": False,
+                "error": "No Music Assistant player found",
+            }
+
+        try:
+            service_map = {
+                "play": "media_play",
+                "pause": "media_pause",
+                "stop": "media_stop",
+                "next": "media_next_track",
+                "previous": "media_previous_track",
+                "volume_up": "volume_up",
+                "volume_down": "volume_down",
+                "shuffle": "shuffle_set",
+                "repeat": "repeat_set",
+            }
+
+            if action == "volume_set" and volume_level is not None:
+                await self.hass.services.async_call(
+                    "media_player",
+                    "volume_set",
+                    {"volume_level": volume_level / 100},
+                    target={"entity_id": target_entity},
+                )
+            elif action in service_map:
+                await self.hass.services.async_call(
+                    "media_player",
+                    service_map[action],
+                    {},
+                    target={"entity_id": target_entity},
+                )
+            else:
+                return {
+                    "success": False,
+                    "error": f"Unknown action: {action}",
+                }
+
+            player_name = self._get_player_name(target_entity)
+            return {
+                "success": True,
+                "message": f"Executed {action} on {player_name}",
+            }
+
+        except Exception as err:
+            _LOGGER.error("Error controlling playback: %s", err)
+            return {
+                "success": False,
+                "error": f"Failed to control playback: {err}",
+            }
+
+    async def search_music(
+        self,
+        query: str,
+        media_type: str | None = None,
+        limit: int = 10,
+        favorites_only: bool = False,
+    ) -> dict[str, Any]:
+        """Search music library and providers.
+
+        Args:
+            query: Search query
+            media_type: Filter by type
+            limit: Max results
+            favorites_only: Only search favorites
+
+        Returns:
+            Search results.
+        """
+        if not self.is_available():
+            return {
+                "success": False,
+                "error": "Music Assistant is not available",
+            }
+
+        try:
+            service_data = {
+                "search": query,
+                "limit": min(limit, 50),
+            }
+
+            if media_type:
+                service_data["media_type"] = media_type
+
+            if favorites_only:
+                service_data["favorite"] = True
+
+            # Use get_library for searching
+            response = await self.hass.services.async_call(
+                "music_assistant",
+                "get_library",
+                service_data,
+                blocking=True,
+                return_response=True,
+            )
+
+            return {
+                "success": True,
+                "results": response if response else [],
+                "query": query,
+            }
+
+        except Exception as err:
+            _LOGGER.error("Error searching music: %s", err)
+            return {
+                "success": False,
+                "error": f"Search failed: {err}",
+            }
+
+    async def transfer_music(
+        self,
+        target_player: str,
+        source_player: str | None = None,
+    ) -> dict[str, Any]:
+        """Transfer music queue to another player.
+
+        Args:
+            target_player: Destination player
+            source_player: Source player (or first active)
+
+        Returns:
+            Result dictionary.
+        """
+        if not self.is_available():
+            return {
+                "success": False,
+                "error": "Music Assistant is not available",
+            }
+
+        target_entity = self.resolve_player(target_player)
+        if not target_entity:
+            return {
+                "success": False,
+                "error": f"Could not find player: {target_player}",
+            }
+
+        source_entity = None
+        if source_player:
+            source_entity = self.resolve_player(source_player)
+
+        try:
+            service_data = {"auto_play": True}
+            if source_entity:
+                service_data["source_player"] = source_entity
+
+            await self.hass.services.async_call(
+                "music_assistant",
+                "transfer_queue",
+                service_data,
+                target={"entity_id": target_entity},
+            )
+
+            target_name = self._get_player_name(target_entity)
+            return {
+                "success": True,
+                "message": f"Transferred music to {target_name}",
+            }
+
+        except Exception as err:
+            _LOGGER.error("Error transferring music: %s", err)
+            return {
+                "success": False,
+                "error": f"Failed to transfer: {err}",
+            }
+```
+
+#### Step 4.3: Update Initial Tools to Include Music
+**File:** `custom_components/voice_assistant/llm_tools.py`
+
+Modify `get_initial_tools()` to conditionally include music tools:
+
+```python
+@staticmethod
+def get_initial_tools(include_music: bool = False) -> list[dict[str, Any]]:
+    """Get initial meta-tools available to the LLM.
+
+    Args:
+        include_music: Whether to include Music Assistant tools.
+
+    Returns:
+        List with query_tools, query_facts, learn_fact, and optionally music tools.
+    """
+    tools = [QUERY_TOOLS_DEFINITION, QUERY_FACTS_DEFINITION, LEARN_FACT_DEFINITION]
+
+    if include_music:
+        tools.extend([
+            PLAY_MUSIC_DEFINITION,
+            GET_NOW_PLAYING_DEFINITION,
+            CONTROL_PLAYBACK_DEFINITION,
+            SEARCH_MUSIC_DEFINITION,
+            TRANSFER_MUSIC_DEFINITION,
+            GET_MUSIC_PLAYERS_DEFINITION,
+        ])
+
+    return tools
+```
+
+#### Step 4.4: Add Configuration Option
+**File:** `custom_components/voice_assistant/const.py`
+
+```python
+# Music Assistant settings
+CONF_ENABLE_MUSIC_ASSISTANT = "enable_music_assistant"
+DEFAULT_ENABLE_MUSIC_ASSISTANT = True
+```
+
+**File:** `custom_components/voice_assistant/config_flow.py`
+
+Add to options form:
+```python
+vol.Optional(
+    CONF_ENABLE_MUSIC_ASSISTANT,
+    default=self.config_entry.options.get(
+        CONF_ENABLE_MUSIC_ASSISTANT, DEFAULT_ENABLE_MUSIC_ASSISTANT
+    ),
+): bool,
+```
+
+#### Step 4.5: Integrate with Conversation Agent
+**File:** `custom_components/voice_assistant/conversation.py`
+
+Add imports:
+```python
+from .music_assistant import MusicAssistantHandler
+from .const import CONF_ENABLE_MUSIC_ASSISTANT, DEFAULT_ENABLE_MUSIC_ASSISTANT
+```
+
+Add to `__init__`:
+```python
+# Initialize Music Assistant handler
+self._music_handler: MusicAssistantHandler | None = None
+```
+
+Add property:
+```python
+@property
+def music_handler(self) -> MusicAssistantHandler:
+    """Get or create the Music Assistant handler."""
+    if self._music_handler is None:
+        self._music_handler = MusicAssistantHandler(self.hass)
+    return self._music_handler
+```
+
+Update tool initialization in `_async_handle_chat_log`:
+```python
+# Check if Music Assistant is enabled and available
+include_music = (
+    self._get_config(CONF_ENABLE_MUSIC_ASSISTANT, DEFAULT_ENABLE_MUSIC_ASSISTANT)
+    and self.music_handler.is_available()
+)
+
+# Start with meta-tools (optionally including music tools)
+current_tools = LLMToolManager.get_initial_tools(include_music=include_music)
+```
+
+Add music tool handlers in streaming and non-streaming paths:
+```python
+# Handle music meta-tools
+music_tool_calls = []
+for tool_call in tool_calls:
+    tool_name = tool_call["function"]["name"]
+    if tool_name in ["play_music", "get_now_playing", "control_playback",
+                      "search_music", "transfer_music", "get_music_players"]:
+        music_tool_calls.append(tool_call)
+
+if music_tool_calls:
+    music_summary = []
+    for tool_call in music_tool_calls:
+        tool_name = tool_call["function"]["name"]
+        arguments = json.loads(tool_call["function"]["arguments"])
+        _LOGGER.info("Handling music tool %s: %s", tool_name, arguments)
+
+        result = await self._handle_music_tool(tool_name, arguments)
+
+        messages.append({
+            "role": "tool",
+            "tool_call_id": tool_call["id"],
+            "content": json.dumps(result),
+        })
+
+        if result.get("success"):
+            music_summary.append(result.get("message", f"Executed {tool_name}"))
+
+    if music_summary:
+        summary_content = AssistantContent(
+            agent_id=DOMAIN,
+            content="\n".join(music_summary),
+        )
+        chat_log.async_add_assistant_content_without_tools(summary_content)
+```
+
+Add handler method:
+```python
+async def _handle_music_tool(
+    self,
+    tool_name: str,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    """Handle music assistant meta-tool calls.
+
+    Args:
+        tool_name: Name of the music tool.
+        arguments: Tool arguments.
+
+    Returns:
+        Result dictionary.
+    """
+    handler = self.music_handler
+
+    try:
+        if tool_name == "play_music":
+            return await handler.play_music(
+                query=arguments.get("query", ""),
+                player=arguments.get("player"),
+                media_type=arguments.get("media_type"),
+                enqueue=arguments.get("enqueue", "replace"),
+                radio_mode=arguments.get("radio_mode", False),
+            )
+        elif tool_name == "get_now_playing":
+            return await handler.get_now_playing(
+                player=arguments.get("player"),
+            )
+        elif tool_name == "control_playback":
+            return await handler.control_playback(
+                action=arguments["action"],
+                player=arguments.get("player"),
+                volume_level=arguments.get("volume_level"),
+            )
+        elif tool_name == "search_music":
+            return await handler.search_music(
+                query=arguments.get("query", ""),
+                media_type=arguments.get("media_type"),
+                limit=arguments.get("limit", 10),
+                favorites_only=arguments.get("favorites_only", False),
+            )
+        elif tool_name == "transfer_music":
+            return await handler.transfer_music(
+                target_player=arguments["target_player"],
+                source_player=arguments.get("source_player"),
+            )
+        elif tool_name == "get_music_players":
+            players = await handler.get_players()
+            return {
+                "success": True,
+                "players": players,
+                "message": f"Found {len(players)} Music Assistant player(s)",
+            }
+        else:
+            return {
+                "success": False,
+                "error": f"Unknown music tool: {tool_name}",
+            }
+    except Exception as err:
+        _LOGGER.error("Error handling music tool %s: %s", tool_name, err)
+        return {
+            "success": False,
+            "error": str(err),
+        }
+```
+
+#### Step 4.6: Update System Prompt for Music
+**File:** `custom_components/voice_assistant/const.py`
+
+Add music instructions to the system prompt:
+```python
+DEFAULT_SYSTEM_PROMPT = """You are a helpful voice-controlled home assistant that can control smart home devices and answer questions.
+
+**IMPORTANT: This is a VOICE interface - users are speaking to you and hearing your responses.**
+Keep responses brief and conversational for voice interaction.
+
+You have access to Home Assistant through a dynamic tool system. Initially, you only have access to meta-tools: `query_tools`, `query_facts`, and `learn_fact`.
+
+**How to interact with Home Assistant:**
+1. When you need to control devices or get information about the home, first call `query_tools` to discover available tools
+2. You can optionally filter by domain (e.g., "light", "climate", "sensor") to get specific tool categories
+3. Once you have the tools, use them to satisfy the user's request
+4. After using tools, provide clear, concise responses confirming actions taken
+
+**Tool Discovery Examples:**
+- `query_tools()` - Get all available Home Assistant tools
+- `query_tools(domain="light")` - Get only light-related tools
+- `query_tools(domain="climate")` - Get only climate/thermostat tools
+
+**Music Control (if Music Assistant is available):**
+You also have access to music-specific tools for controlling Music Assistant:
+- `play_music(query, player?, media_type?, enqueue?, radio_mode?)` - Play music by artist, album, track, or playlist
+- `get_now_playing(player?)` - Check what's currently playing
+- `control_playback(action, player?, volume_level?)` - Play, pause, skip, volume control
+- `search_music(query, media_type?, limit?)` - Search the music library
+- `transfer_music(target_player, source_player?)` - Move music between rooms
+- `get_music_players()` - List available music players/speakers
+
+Music command examples:
+- "Play some jazz" → play_music(query="jazz", media_type="playlist")
+- "What's playing?" → get_now_playing()
+- "Skip this song" → control_playback(action="next")
+- "Play Queen in the kitchen" → play_music(query="Queen", media_type="artist", player="kitchen")
+- "Move the music to the bedroom" → transfer_music(target_player="bedroom")
+
+**Learning and Remembering User Information:**
+- When users share personal information (names, preferences, routines, etc.), IMMEDIATELY use `learn_fact` to store it
+- Examples: "My name is John", "My cat's name is Amy", "I like the temperature at 72°F"
+- When you need context about the user, use `query_facts` to retrieve stored information
+- Facts persist across all conversations - this is how you remember users between sessions
+
+**Token Efficiency:**
+- Only query for tools when you actually need them
+- Only query facts when you need user context
+- For simple questions that don't require Home Assistant interaction, just answer directly"""
+```
+
+#### Step 4.7: Update Strings/Translations
+**File:** `custom_components/voice_assistant/strings.json`
+
+Add music configuration strings:
+```json
+{
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "enable_music_assistant": "Enable Music Assistant integration"
+        },
+        "data_description": {
+          "enable_music_assistant": "Enable voice control for Music Assistant. Requires Music Assistant to be installed and configured."
+        }
+      }
+    }
+  }
+}
+```
+
+### Testing Checklist for Music Assistant
+- [ ] Music Assistant detection works when integration is present
+- [ ] Music Assistant detection gracefully fails when not present
+- [ ] `play_music` plays correct content on specified player
+- [ ] `play_music` resolves room names to entity_ids
+- [ ] `play_music` falls back to first available player when none specified
+- [ ] `get_now_playing` returns correct track information
+- [ ] `control_playback` executes all supported actions
+- [ ] `search_music` returns relevant results
+- [ ] `transfer_music` moves queue between players
+- [ ] `get_music_players` lists all MA players
+- [ ] Radio mode generates similar tracks
+- [ ] Enqueue modes work (play, replace, next, add)
+- [ ] Configuration option enables/disables music tools
+- [ ] System prompt includes music instructions when enabled
+- [ ] Error handling is graceful for all failure modes
+
+### Voice Command Examples to Test
+
+| User Says | Expected Action |
+|-----------|-----------------|
+| "Play some music" | `play_music(query="popular music")` |
+| "Play jazz in the living room" | `play_music(query="jazz", player="living room")` |
+| "Play Bohemian Rhapsody by Queen" | `play_music(query="Bohemian Rhapsody", artist="Queen", media_type="track")` |
+| "What's playing?" | `get_now_playing()` |
+| "What song is this?" | `get_now_playing()` |
+| "Pause the music" | `control_playback(action="pause")` |
+| "Skip this song" | `control_playback(action="next")` |
+| "Turn up the volume" | `control_playback(action="volume_up")` |
+| "Set volume to 50%" | `control_playback(action="volume_set", volume_level=50)` |
+| "Move the music to the kitchen" | `transfer_music(target_player="kitchen")` |
+| "Play the Beatles and add similar songs" | `play_music(query="Beatles", radio_mode=True)` |
+| "Find songs by Taylor Swift" | `search_music(query="Taylor Swift", media_type="track")` |
+| "What speakers are available?" | `get_music_players()` |
+
+### Notes
+
+1. **Graceful Degradation**: If Music Assistant is not installed, the integration should work normally without music features.
+
+2. **Player Resolution**: The system should be flexible in accepting room names ("living room", "kitchen") or entity IDs (`media_player.ma_living_room`).
+
+3. **Context Awareness**: The LLM should be able to infer which player to use based on conversation context (e.g., "turn it up" refers to the last mentioned player).
+
+4. **Error Messages**: Provide helpful error messages when Music Assistant is not available or when players cannot be found.
+
+5. **Service Availability**: Always check `is_available()` before attempting Music Assistant operations.
+
+---
+
+## Implementation Priority Update
+
+With Music Assistant feature added, recommended order:
+
+1. ✅ **Voice Assistant Listening Control** (Feature 3) - COMPLETED
+2. ✅ **Conversation History Management** (Feature 2) - COMPLETED
+3. ✅ **Streaming Response Support** (Feature 1) - COMPLETED
+4. ⏳ **Music Assistant Integration** (Feature 4) - NEW
+
+---
+
+## References
+
+- [Music Assistant Home Assistant Integration](https://www.home-assistant.io/integrations/music_assistant/)
+- [Music Assistant API Documentation](https://www.music-assistant.io/api/)
+- [Music Assistant play_media Action](https://www.music-assistant.io/faq/massplaymedia/)
+- [Music Assistant get_queue Action](https://www.music-assistant.io/faq/get_queue/)
+- [Music Assistant Python Client](https://github.com/music-assistant/client)
