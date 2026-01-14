@@ -10,8 +10,12 @@ A custom Home Assistant integration that provides an LLM-powered conversation ag
 - **Direct Home Assistant API Integration**: Bypasses the traditional intent system for more flexible control
 - **Token-Efficient**: Dynamically loads only required tools instead of sending complete lists with every request
 - **Streaming Support**: Real-time response streaming via Home Assistant's delta function
+- **Conversation Memory**: Global session with configurable timeout and cross-conversation context
+- **Fact Learning**: Persistent fact storage - the assistant remembers user preferences, names, and routines
+- **Voice Assistant Listening Control**: Control when the assistant continues listening after responses
+- **Music Assistant Integration**: Voice control for Music Assistant - play music, control playback, transfer between rooms
 - **Multi-LLM Support**: Extensible architecture supporting multiple LLM providers
-  - Groq (initial implementation)
+  - Groq (implemented)
   - OpenAI (planned)
   - Anthropic (planned)
   - Local LLMs (planned)
@@ -68,16 +72,27 @@ After configuration, the integration will register as a conversation agent. You 
 
 ## Current Status
 
-This integration is in early development. Currently implemented:
-- Basic integration structure
-- Configuration flow
-- LLM provider abstraction layer
+This integration has all core features implemented and tested:
 
-Coming soon:
-- Groq provider implementation
-- Conversation agent
-- Home Assistant API client
-- Streaming support
+### ✅ Completed Features
+- **Core Integration**: Full integration structure, configuration flow, LLM provider abstraction
+- **Groq Provider**: Complete implementation with tool calling and streaming support
+- **Conversation Agent**: Full conversation handling with Home Assistant integration
+- **Streaming Responses**: Real-time streaming via Home Assistant's delta function
+- **Conversation History**: Global session with configurable timeout (1-600 seconds)
+- **Fact Learning**: Three-tier fact system (learn_fact, query_facts, automatic extraction)
+- **Voice Listening Control**: Configurable listening behavior after responses
+- **Music Assistant**: Voice control for Music Assistant playback and queue management
+
+### 🔧 Configuration Options
+- `enable_streaming`: Enable/disable streaming responses
+- `conversation_timeout`: Session timeout in seconds (default: 60)
+- `enable_fact_learning`: Enable/disable fact learning system
+- `auto_continue_listening`: Control listening behavior after questions
+- `enable_music_assistant`: Enable/disable Music Assistant integration
+
+### ⏳ Planned
+- Additional LLM providers (OpenAI, Anthropic, local LLMs)
 
 ## License
 

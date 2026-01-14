@@ -1,6 +1,8 @@
 # Additional Requirements
 
-## Conversation History Management
+> **Note:** All requirements documented here have been implemented. See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for detailed implementation documentation and [SESSION_NOTES.md](SESSION_NOTES.md) for technical notes.
+
+## Conversation History Management ✅ IMPLEMENTED
 
 ### External History Storage
 **Requirement:** Keep conversation history outside of Home Assistant's internal system.
@@ -25,7 +27,7 @@
 - Device nicknames and locations
 - Routine patterns
 
-## Voice Assistant Listening Control
+## Voice Assistant Listening Control ✅ IMPLEMENTED
 
 ### Problem
 Home Assistant's voice assistant keeps listening if the LLM response ends with a question mark (`?`), which may not always be desired.
