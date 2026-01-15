@@ -3,7 +3,6 @@
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
 [![GitHub Release](https://img.shields.io/github/release/kainzpat14/home_assistant_llm_claude.svg)](https://github.com/kainzpat14/home_assistant_llm_claude/releases)
 [![Tests](https://github.com/kainzpat14/home_assistant_llm_claude/actions/workflows/tests.yml/badge.svg)](https://github.com/kainzpat14/home_assistant_llm_claude/actions/workflows/tests.yml)
-[![codecov](https://codecov.io/gh/kainzpat14/home_assistant_llm_claude/branch/main/graph/badge.svg)](https://codecov.io/gh/kainzpat14/home_assistant_llm_claude)
 
 A custom Home Assistant integration that provides an LLM-powered conversation agent for voice assistants with direct API integration.
 
