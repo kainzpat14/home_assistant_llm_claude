@@ -51,6 +51,7 @@ from .response_processor import (
 from .llm_tools import LLMToolManager
 from .storage import FactStore
 from . import tool_handlers
+from .streaming_buffer import StreamingBufferProcessor
 
 if TYPE_CHECKING:
     from homeassistant.components.conversation import ChatLog
@@ -325,54 +326,21 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         for iteration in range(MAX_TOOL_ITERATIONS):
             _LOGGER.debug("Streaming iteration %d starting", iteration + 1)
 
-            accumulated_content = ""
-            chunk_buffer = ""  # Buffer for chunks that might contain partial marker
-            tool_calls = None
-            marker_found = False
+            # Create buffer processor for this iteration
+            buffer_processor = StreamingBufferProcessor(CONTINUE_LISTENING_MARKER)
 
-            # Stream from LLM and accumulate
+            # Stream from LLM using buffer processor
             _LOGGER.debug("Starting to stream chunks from LLM provider")
-            async for chunk in self.provider.generate_stream_with_tools(messages, current_tools):
-                if chunk.content:
-                    _LOGGER.debug("Received chunk: %r (length: %d)", chunk.content, len(chunk.content))
-                    accumulated_content += chunk.content
-                    chunk_buffer += chunk.content
+            async for content_delta in buffer_processor.process_chunks(
+                self.provider.generate_stream_with_tools(messages, current_tools)
+            ):
+                yield content_delta
 
-                    # Check if we've completed the marker in the buffer
-                    if CONTINUE_LISTENING_MARKER in chunk_buffer:
-                        marker_found = True
-                        _LOGGER.info("*** FOUND COMPLETE CONTINUE_LISTENING MARKER in buffer! ***")
-
-                        # Remove marker from buffer and yield everything
-                        clean_buffer = chunk_buffer.replace(CONTINUE_LISTENING_MARKER, "")
-                        if clean_buffer:
-                            yield {"content": clean_buffer}
-                            _LOGGER.debug("Yielded buffer with marker removed: %r", clean_buffer)
-
-                        # Clear buffer since we've yielded it
-                        chunk_buffer = ""
-                    elif self._buffer_might_contain_partial_marker(chunk_buffer):
-                        # Buffer might contain start of marker, hold off on yielding
-                        _LOGGER.debug("Buffer might contain partial marker, holding: %r", chunk_buffer[-20:] if len(chunk_buffer) > 20 else chunk_buffer)
-                    else:
-                        # Buffer doesn't contain marker or partial marker, safe to yield
-                        if chunk_buffer:
-                            yield {"content": chunk_buffer}
-                            _LOGGER.debug("No marker risk, yielding buffer: %r", chunk_buffer)
-                        chunk_buffer = ""
-
-                if chunk.is_final and chunk.tool_calls:
-                    tool_calls = chunk.tool_calls
-                    _LOGGER.debug("Final chunk received with %d tool calls", len(tool_calls))
-
-            # Yield any remaining buffer content (marker wasn't completed)
-            if chunk_buffer and not marker_found:
-                yield {"content": chunk_buffer}
-                _LOGGER.debug("End of stream, yielding remaining buffer: %r", chunk_buffer)
-
-            _LOGGER.debug("Finished streaming, accumulated content length: %d", len(accumulated_content))
-            _LOGGER.debug("Full accumulated content: %r", accumulated_content[:200] + "..." if len(accumulated_content) > 200 else accumulated_content)
-            _LOGGER.debug("Marker found: %s", marker_found)
+            # Get the processing result
+            result = buffer_processor.get_result()
+            accumulated_content = result.accumulated_content
+            tool_calls = result.tool_calls
+            marker_found = result.marker_found
 
             # If no tool calls, we're done
             if not tool_calls:
@@ -380,12 +348,8 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                 original_content_holder.append(accumulated_content)
 
                 # If marker was present, ensure response ends with ?
-                if marker_found:
-                    # Remove marker from accumulated content for checking
-                    clean_content = accumulated_content.replace(CONTINUE_LISTENING_MARKER, "").strip()
-                    if not clean_content.endswith("?"):
-                        yield {"content": "?"}
-                        _LOGGER.debug("Added question mark after streaming (CONTINUE_LISTENING marker present)")
+                async for content_delta in buffer_processor.finalize_response():
+                    yield content_delta
 
                 _LOGGER.debug("No tool calls, streaming complete")
                 return
@@ -541,31 +505,6 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         # If we hit max iterations, return last content or error
         _LOGGER.warning("Hit max tool iterations (%d)", MAX_TOOL_ITERATIONS)
         return response.get("content", "I encountered an issue processing your request.")
-
-    def _buffer_might_contain_partial_marker(self, buffer: str) -> bool:
-        """Check if buffer ends with a partial match of the CONTINUE_LISTENING marker.
-
-        This checks if the end of the buffer could be the beginning of the marker,
-        which means we should hold the buffer until we get more chunks.
-
-        Args:
-            buffer: The current chunk buffer.
-
-        Returns:
-            True if buffer might contain a partial marker, False otherwise.
-        """
-        # Check if buffer ends with any prefix of the marker
-        # For marker "[CONTINUE_LISTENING]", check for: "[", "[C", "[CO", "[CON", etc.
-        marker = CONTINUE_LISTENING_MARKER
-
-        # Check progressively longer prefixes of the marker
-        for i in range(1, len(marker)):
-            prefix = marker[:i]
-            if buffer.endswith(prefix):
-                _LOGGER.debug("Buffer ends with partial marker prefix: %r", prefix)
-                return True
-
-        return False
 
     def _handle_query_tools(
         self,
