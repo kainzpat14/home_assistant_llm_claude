@@ -2,6 +2,7 @@
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
 [![GitHub Release](https://img.shields.io/github/release/kainzpat14/home_assistant_llm_claude.svg)](https://github.com/kainzpat14/home_assistant_llm_claude/releases)
+[![Tests](https://github.com/kainzpat14/home_assistant_llm_claude/actions/workflows/tests.yml/badge.svg)](https://github.com/kainzpat14/home_assistant_llm_claude/actions/workflows/tests.yml)
 
 A custom Home Assistant integration that provides an LLM-powered conversation agent for voice assistants with direct API integration.
 
@@ -98,9 +99,58 @@ This integration has all core features implemented and tested:
 
 MIT License
 
+## Development
+
+### Running Tests
+
+This project includes comprehensive unit tests for core functionality. To run tests locally:
+
+```bash
+# Install development dependencies
+pip install -r requirements-dev.txt
+
+# Run all tests
+pytest tests/
+
+# Run tests with coverage report
+pytest tests/ --cov=custom_components/voice_assistant --cov-report=html
+
+# View coverage report
+open htmlcov/index.html
+```
+
+### Test Coverage
+
+Current test coverage: **96 tests, 30% overall coverage**
+
+Covered modules (100% coverage):
+- `response_processor.py` - Voice listening control logic
+- `storage.py` - Fact persistence
+- `conversation_manager.py` - Session management (95%)
+- `llm/base.py` - Abstract provider interface
+- `llm/factory.py` - Provider factory
+- `llm/groq.py` - Groq API integration (87%)
+- `const.py` - Constants
+
+Modules requiring Home Assistant test harness (not covered):
+- `conversation.py` - Main conversation entity
+- `config_flow.py` - UI configuration
+- `llm_tools.py` - HA tool discovery
+- `music_assistant.py` - Music integration
+
+### Continuous Integration
+
+All pull requests automatically run tests via GitHub Actions on Python 3.11 and 3.12.
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+When contributing:
+1. Add tests for new functionality
+2. Ensure all tests pass: `pytest tests/`
+3. Follow existing code style
+4. Update documentation as needed
 
 ## Support
 
