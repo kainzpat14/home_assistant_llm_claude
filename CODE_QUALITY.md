@@ -19,11 +19,11 @@ _LOGGER.debug("Config entry data: %s", entry.data)  # Contains CONF_API_KEY!
 - **Impact**: Connection pool exhaustion over time
 - **Solution**: Add `async_close()` method and proper cleanup
 
-### 3. **Error Masking: API Key Validation**
+### 3. **Error Masking: API Key Validation** ⛔ WON'T FIX
 - **Location**: `config_flow.py:78-81, groq.py:223`
 - **Issue**: All exceptions caught and returned as generic failures
 - **Impact**: Users get unhelpful error messages, debugging is difficult
-- **Solution**: Catch specific exceptions, log details, return meaningful errors
+- **Reason**: Generic error handling is intentional for API key validation to avoid exposing internal error details to users. Detailed errors are already logged for debugging.
 
 ### 4. **Task Garbage Collection Risk** ✅ FIXED
 - **Location**: `conversation_manager.py:112`
@@ -33,13 +33,13 @@ asyncio.create_task(self._handle_session_timeout())  # Task could be GC'd
 ```
 - **Solution**: Store task reference or use `hass.async_create_task()`
 
-### 5. **KeyError Risk: Missing API Key**
+### 5. **KeyError Risk: Missing API Key** ⛔ WON'T FIX
 - **Location**: `conversation.py:112`
 - **Issue**: Direct dict access without validation
 ```python
 api_key=self.entry.data[CONF_API_KEY],  # Could raise KeyError
 ```
-- **Solution**: Use `.get()` with validation or add try/except
+- **Reason**: API key is guaranteed to exist in `entry.data` by the config flow validation. If it's missing, a KeyError is the correct behavior as it indicates a serious configuration corruption that should fail fast.
 
 ---
 
@@ -89,13 +89,21 @@ api_key=self.entry.data[CONF_API_KEY],  # Could raise KeyError
 
 ## 🟡 Medium Priority Issues
 
-### 11. **Method Complexity: Very Long Methods**
+### 11. **Method Complexity: Very Long Methods & File Size** ✅ IMPROVED
 - **Locations**:
   - `conversation.py:299` - `_stream_response_with_tools()` (266 lines, too complex)
   - `conversation.py:610` - `_process_with_tools()` (228 lines, too complex)
+  - `conversation.py` - 1075 lines total (too large)
 - **Issue**: Hard to test, understand, and maintain
 - **Suggestion**: Break into smaller, focused methods
 - **Cyclomatic complexity**: Likely >15 (threshold should be <10)
+- **Improvement**: Extracted tool handling logic into separate `tool_handlers.py` module
+  - Reduced `conversation.py` from 1075 to 843 lines (22% reduction, 232 lines removed)
+  - Created new `tool_handlers.py` with 289 lines and 6 focused functions
+  - Functions: `categorize_tool_calls()`, `handle_query_tools_calls()`, `handle_query_facts_calls()`, `handle_learn_fact_calls()`, `handle_music_tool_calls()`, `handle_ha_tool_calls()`
+  - Improved testability - tool handlers can now be unit tested independently
+  - Better separation of concerns - tool handling logic isolated from conversation flow
+  - Methods still long but significantly improved modularity
 
 ### 12. **JSON Parsing Without Error Handling**
 - **Locations**: `conversation.py:427, 456, 485, 514, 676, 709, 742, 775`

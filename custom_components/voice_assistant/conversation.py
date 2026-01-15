@@ -50,6 +50,7 @@ from .response_processor import (
 )
 from .llm_tools import LLMToolManager
 from .storage import FactStore
+from . import tool_handlers
 
 if TYPE_CHECKING:
     from homeassistant.components.conversation import ChatLog
@@ -394,7 +395,7 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
 
             # Categorize tool calls
             (query_tools_calls, query_facts_calls, learn_fact_calls,
-             music_tool_calls, ha_tool_calls) = self._categorize_tool_calls(tool_calls)
+             music_tool_calls, ha_tool_calls) = tool_handlers.categorize_tool_calls(tool_calls)
 
             # Add assistant message with tool calls to history
             messages.append({
@@ -403,15 +404,23 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                 "tool_calls": tool_calls,
             })
 
-            # Handle each type of tool call using shared helper methods
-            await self._handle_query_tools_calls(
-                query_tools_calls, current_tools, tool_manager, messages, chat_log
+            # Handle each type of tool call using shared helper functions
+            await tool_handlers.handle_query_tools_calls(
+                query_tools_calls, current_tools, tool_manager, messages, chat_log,
+                self._handle_query_tools
             )
-            await self._handle_query_facts_calls(query_facts_calls, messages, chat_log)
-            await self._handle_learn_fact_calls(learn_fact_calls, messages, chat_log)
-            await self._handle_music_tool_calls(music_tool_calls, messages, chat_log)
-            await self._handle_ha_tool_calls(
-                ha_tool_calls, messages, chat_log, user_input, accumulated_content
+            await tool_handlers.handle_query_facts_calls(
+                query_facts_calls, messages, chat_log, self._handle_query_facts
+            )
+            await tool_handlers.handle_learn_fact_calls(
+                learn_fact_calls, messages, chat_log, self._handle_learn_fact
+            )
+            await tool_handlers.handle_music_tool_calls(
+                music_tool_calls, messages, chat_log, self._handle_music_tool
+            )
+            await tool_handlers.handle_ha_tool_calls(
+                ha_tool_calls, messages, chat_log, user_input, accumulated_content,
+                self._convert_tool_calls_to_inputs
             )
 
         # Max iterations reached
@@ -501,7 +510,7 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
 
             # Categorize tool calls
             (query_tools_calls, query_facts_calls, learn_fact_calls,
-             music_tool_calls, ha_tool_calls) = self._categorize_tool_calls(tool_calls)
+             music_tool_calls, ha_tool_calls) = tool_handlers.categorize_tool_calls(tool_calls)
 
             # Add assistant message with tool calls to history for LLM context
             messages.append({
@@ -510,269 +519,28 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                 "tool_calls": tool_calls,
             })
 
-            # Handle each type of tool call using shared helper methods
-            await self._handle_query_tools_calls(
-                query_tools_calls, current_tools, tool_manager, messages, chat_log
+            # Handle each type of tool call using shared helper functions
+            await tool_handlers.handle_query_tools_calls(
+                query_tools_calls, current_tools, tool_manager, messages, chat_log,
+                self._handle_query_tools
             )
-            await self._handle_query_facts_calls(query_facts_calls, messages, chat_log)
-            await self._handle_learn_fact_calls(learn_fact_calls, messages, chat_log)
-            await self._handle_music_tool_calls(music_tool_calls, messages, chat_log)
-            await self._handle_ha_tool_calls(
-                ha_tool_calls, messages, chat_log, user_input, response.get("content", "")
+            await tool_handlers.handle_query_facts_calls(
+                query_facts_calls, messages, chat_log, self._handle_query_facts
+            )
+            await tool_handlers.handle_learn_fact_calls(
+                learn_fact_calls, messages, chat_log, self._handle_learn_fact
+            )
+            await tool_handlers.handle_music_tool_calls(
+                music_tool_calls, messages, chat_log, self._handle_music_tool
+            )
+            await tool_handlers.handle_ha_tool_calls(
+                ha_tool_calls, messages, chat_log, user_input, response.get("content", ""),
+                self._convert_tool_calls_to_inputs
             )
 
         # If we hit max iterations, return last content or error
         _LOGGER.warning("Hit max tool iterations (%d)", MAX_TOOL_ITERATIONS)
         return response.get("content", "I encountered an issue processing your request.")
-
-    def _categorize_tool_calls(
-        self, tool_calls: list[dict[str, Any]]
-    ) -> tuple[list, list, list, list, list]:
-        """Categorize tool calls into different types.
-
-        Args:
-            tool_calls: List of tool calls to categorize.
-
-        Returns:
-            Tuple of (query_tools_calls, query_facts_calls, learn_fact_calls,
-                     music_tool_calls, ha_tool_calls).
-        """
-        query_tools_calls = []
-        query_facts_calls = []
-        learn_fact_calls = []
-        music_tool_calls = []
-        ha_tool_calls = []
-
-        for tool_call in tool_calls:
-            tool_name = tool_call["function"]["name"]
-            if tool_name == "query_tools":
-                query_tools_calls.append(tool_call)
-            elif tool_name == "query_facts":
-                query_facts_calls.append(tool_call)
-            elif tool_name == "learn_fact":
-                learn_fact_calls.append(tool_call)
-            elif tool_name in ["play_music", "get_now_playing", "control_playback",
-                                 "search_music", "transfer_music", "get_music_players"]:
-                music_tool_calls.append(tool_call)
-            else:
-                ha_tool_calls.append(tool_call)
-
-        return (query_tools_calls, query_facts_calls, learn_fact_calls,
-                music_tool_calls, ha_tool_calls)
-
-    async def _handle_query_tools_calls(
-        self,
-        query_tools_calls: list[dict[str, Any]],
-        current_tools: list[dict[str, Any]],
-        tool_manager: LLMToolManager,
-        messages: list[dict[str, Any]],
-        chat_log: ChatLog,
-    ) -> None:
-        """Handle query_tools meta-tool calls.
-
-        Args:
-            query_tools_calls: List of query_tools tool calls.
-            current_tools: Current list of available tools (will be modified).
-            tool_manager: The tool manager.
-            messages: Messages list (will be modified).
-            chat_log: The chat log.
-        """
-        if not query_tools_calls:
-            return
-
-        query_tools_summary = []
-        for tool_call in query_tools_calls:
-            arguments = json.loads(tool_call["function"]["arguments"])
-            _LOGGER.info("Handling query_tools: %s", arguments)
-
-            result = self._handle_query_tools(arguments, current_tools, tool_manager)
-
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tool_call["id"],
-                "content": json.dumps(result),
-            })
-
-            domain_filter = arguments.get("domain", "all domains")
-            if result.get("success"):
-                tools_found = result.get("result", {}).get("tools", [])
-                query_tools_summary.append(
-                    f"Discovered {len(tools_found)} tools for {domain_filter}"
-                )
-
-        if query_tools_summary:
-            summary_content = AssistantContent(
-                agent_id=DOMAIN,
-                content="\n".join(query_tools_summary),
-            )
-            chat_log.async_add_assistant_content_without_tools(summary_content)
-
-    async def _handle_query_facts_calls(
-        self,
-        query_facts_calls: list[dict[str, Any]],
-        messages: list[dict[str, Any]],
-        chat_log: ChatLog,
-    ) -> None:
-        """Handle query_facts meta-tool calls.
-
-        Args:
-            query_facts_calls: List of query_facts tool calls.
-            messages: Messages list (will be modified).
-            chat_log: The chat log.
-        """
-        if not query_facts_calls:
-            return
-
-        query_facts_summary = []
-        for tool_call in query_facts_calls:
-            arguments = json.loads(tool_call["function"]["arguments"])
-            _LOGGER.info("Handling query_facts: %s", arguments)
-
-            result = self._handle_query_facts(arguments)
-
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tool_call["id"],
-                "content": json.dumps(result),
-            })
-
-            category_filter = arguments.get("category", "all categories")
-            if result.get("success"):
-                facts_found = result.get("facts", {})
-                query_facts_summary.append(
-                    f"Retrieved {len(facts_found)} facts for {category_filter}"
-                )
-
-        if query_facts_summary:
-            summary_content = AssistantContent(
-                agent_id=DOMAIN,
-                content="\n".join(query_facts_summary),
-            )
-            chat_log.async_add_assistant_content_without_tools(summary_content)
-
-    async def _handle_learn_fact_calls(
-        self,
-        learn_fact_calls: list[dict[str, Any]],
-        messages: list[dict[str, Any]],
-        chat_log: ChatLog,
-    ) -> None:
-        """Handle learn_fact meta-tool calls.
-
-        Args:
-            learn_fact_calls: List of learn_fact tool calls.
-            messages: Messages list (will be modified).
-            chat_log: The chat log.
-        """
-        if not learn_fact_calls:
-            return
-
-        learn_fact_summary = []
-        for tool_call in learn_fact_calls:
-            arguments = json.loads(tool_call["function"]["arguments"])
-            _LOGGER.info("Handling learn_fact: %s", arguments)
-
-            result = await self._handle_learn_fact(arguments)
-
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tool_call["id"],
-                "content": json.dumps(result),
-            })
-
-            if result.get("success"):
-                key = arguments.get("key", "unknown")
-                learn_fact_summary.append(
-                    f"Learned fact: {key}"
-                )
-
-        if learn_fact_summary:
-            summary_content = AssistantContent(
-                agent_id=DOMAIN,
-                content="\n".join(learn_fact_summary),
-            )
-            chat_log.async_add_assistant_content_without_tools(summary_content)
-
-    async def _handle_music_tool_calls(
-        self,
-        music_tool_calls: list[dict[str, Any]],
-        messages: list[dict[str, Any]],
-        chat_log: ChatLog,
-    ) -> None:
-        """Handle music assistant meta-tool calls.
-
-        Args:
-            music_tool_calls: List of music tool calls.
-            messages: Messages list (will be modified).
-            chat_log: The chat log.
-        """
-        if not music_tool_calls:
-            return
-
-        music_summary = []
-        for tool_call in music_tool_calls:
-            tool_name = tool_call["function"]["name"]
-            arguments = json.loads(tool_call["function"]["arguments"])
-            _LOGGER.info("Handling music tool %s: %s", tool_name, arguments)
-
-            result = await self._handle_music_tool(tool_name, arguments)
-
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tool_call["id"],
-                "content": json.dumps(result),
-            })
-
-            if result.get("success"):
-                music_summary.append(result.get("message", f"Executed {tool_name}"))
-
-        if music_summary:
-            summary_content = AssistantContent(
-                agent_id=DOMAIN,
-                content="\n".join(music_summary),
-            )
-            chat_log.async_add_assistant_content_without_tools(summary_content)
-
-    async def _handle_ha_tool_calls(
-        self,
-        ha_tool_calls: list[dict[str, Any]],
-        messages: list[dict[str, Any]],
-        chat_log: ChatLog,
-        user_input: conversation.ConversationInput,
-        accumulated_content: str,
-    ) -> None:
-        """Handle Home Assistant tool calls.
-
-        Args:
-            ha_tool_calls: List of HA tool calls.
-            messages: Messages list (will be modified).
-            chat_log: The chat log.
-            user_input: The original user input.
-            accumulated_content: The accumulated assistant content.
-        """
-        if not ha_tool_calls:
-            return
-
-        _LOGGER.info("Processing %d HA tool call(s)", len(ha_tool_calls))
-
-        tool_inputs = self._convert_tool_calls_to_inputs(ha_tool_calls, user_input)
-
-        assistant_content = AssistantContent(
-            agent_id=DOMAIN,
-            content=accumulated_content,
-            tool_calls=tool_inputs,
-        )
-
-        async for tool_result in chat_log.async_add_assistant_content(assistant_content):
-            _LOGGER.info(
-                "Tool %s executed",
-                tool_result.tool_name,
-            )
-
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tool_result.tool_call_id,
-                "content": json.dumps(tool_result.tool_result),
-            })
 
     def _buffer_might_contain_partial_marker(self, buffer: str) -> bool:
         """Check if buffer ends with a partial match of the CONTINUE_LISTENING marker.
