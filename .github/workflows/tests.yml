@@ -1,0 +1,68 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main, master, claude/* ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12']
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-dev.txt
+        pip install groq
+
+    - name: Run tests with coverage
+      run: |
+        python -m pytest tests/ -v --cov=custom_components/voice_assistant --cov-report=xml --cov-report=term --cov-report=html
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v4
+      if: matrix.python-version == '3.11'
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+      env:
+        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+    - name: Generate coverage badge
+      if: matrix.python-version == '3.11' && github.ref == 'refs/heads/main'
+      run: |
+        COVERAGE=$(python -m pytest tests/ --cov=custom_components/voice_assistant --cov-report=term | grep "TOTAL" | awk '{print $4}' | sed 's/%//')
+        echo "Coverage: ${COVERAGE}%"
+        echo "COVERAGE=${COVERAGE}" >> $GITHUB_ENV
+
+    - name: Upload coverage reports
+      uses: actions/upload-artifact@v4
+      if: matrix.python-version == '3.11'
+      with:
+        name: coverage-reports
+        path: |
+          coverage.xml
+          htmlcov/
+
+    - name: Comment PR with coverage
+      uses: py-cov-action/python-coverage-comment-action@v3
+      if: github.event_name == 'pull_request' && matrix.python-version == '3.11'
+      with:
+        GITHUB_TOKEN: ${{ github.token }}
+        MINIMUM_GREEN: 80
+        MINIMUM_ORANGE: 60
