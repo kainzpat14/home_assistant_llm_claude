@@ -31,15 +31,15 @@ jobs:
 
     - name: Run tests with coverage
       run: |
-        python -m pytest tests/ -v --cov=custom_components/voice_assistant --cov-report=xml --cov-report=term --cov-report=html
+        python -m pytest tests/ -v --cov=custom_components/voice_assistant --cov-report=xml --cov-report=term --cov-report=html 2>&1 | tee pytest_output.txt
 
     - name: Display coverage summary
-      if: matrix.python-version == '3.11'
+      if: matrix.python-version == '3.11' && always()
       run: |
-        echo "## Coverage Report" >> $GITHUB_STEP_SUMMARY
-        python -m pytest tests/ --cov=custom_components/voice_assistant --cov-report=term | tee coverage_output.txt
+        echo "## Test Results - Python ${{ matrix.python-version }}" >> $GITHUB_STEP_SUMMARY
         echo '```' >> $GITHUB_STEP_SUMMARY
-        cat coverage_output.txt >> $GITHUB_STEP_SUMMARY
+        # Extract just the coverage table from the output
+        grep -A 100 "^Name" pytest_output.txt | grep -B 100 "^TOTAL" >> $GITHUB_STEP_SUMMARY || echo "Coverage report not found" >> $GITHUB_STEP_SUMMARY
         echo '```' >> $GITHUB_STEP_SUMMARY
 
     - name: Upload coverage reports
