@@ -109,7 +109,8 @@ class ConversationManager:
         if self._session.is_expired(self.timeout_seconds):
             # Session expired - extract facts and clear
             _LOGGER.info("Global session expired, extracting facts and clearing")
-            asyncio.create_task(self._handle_session_timeout())
+            # Use Home Assistant's task creation to prevent garbage collection
+            self.hass.async_create_task(self._handle_session_timeout())
             self._session.clear()
 
         return self._session

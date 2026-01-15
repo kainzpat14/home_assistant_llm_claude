@@ -24,7 +24,7 @@ PLATFORMS: list[Platform] = [Platform.CONVERSATION]
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Voice Assistant LLM from a config entry."""
     _LOGGER.info("Setting up Voice Assistant LLM integration (entry_id: %s)", entry.entry_id)
-    _LOGGER.debug("Config entry data: %s", entry.data)
+    # Note: entry.data contains API key, do not log it
     _LOGGER.debug("Config entry options: %s", entry.options)
 
     hass.data.setdefault(DOMAIN, {})

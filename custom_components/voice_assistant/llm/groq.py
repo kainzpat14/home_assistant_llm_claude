@@ -43,6 +43,16 @@ class GroqProvider(BaseLLMProvider):
             self._client = AsyncGroq(api_key=self.api_key)
         return self._client
 
+    async def async_close(self) -> None:
+        """Close the Groq client and cleanup resources."""
+        if self._client is not None:
+            try:
+                await self._client.close()
+            except Exception as err:
+                _LOGGER.warning("Error closing Groq client: %s", err)
+            finally:
+                self._client = None
+
     async def generate(
         self,
         messages: list[dict[str, Any]],
