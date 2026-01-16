@@ -258,31 +258,6 @@ class TestConversationManager:
         assert fact_store.get_fact("empty_field") is None
         assert fact_store.get_fact("none_field") is None
 
-    def test_build_facts_prompt_section_no_facts(self, manager):
-        """Test building facts prompt section with no facts."""
-        prompt_section = manager.build_facts_prompt_section()
-
-        assert prompt_section == ""
-
-    def test_build_facts_prompt_section_with_facts(self, manager, fact_store):
-        """Test building facts prompt section with facts."""
-        fact_store.add_fact("user_name", "Alice")
-        fact_store.add_fact("favorite_color", "blue")
-
-        prompt_section = manager.build_facts_prompt_section()
-
-        assert "Known information about this user:" in prompt_section
-        assert "User Name: Alice" in prompt_section
-        assert "Favorite Color: blue" in prompt_section
-
-    def test_build_facts_prompt_section_with_list_value(self, manager, fact_store):
-        """Test building facts prompt section with list values."""
-        fact_store.add_fact("family_members", ["Alice", "Bob", "Charlie"])
-
-        prompt_section = manager.build_facts_prompt_section()
-
-        assert "Family Members: Alice, Bob, Charlie" in prompt_section
-
     async def test_start_cleanup_task(self, manager):
         """Test starting the cleanup task."""
         await manager.start_cleanup_task()

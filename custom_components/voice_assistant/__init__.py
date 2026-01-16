@@ -14,9 +14,6 @@ if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
-# Set minimum log level to DEBUG to ensure debug logging capability
-# Home Assistant's configuration.yaml can still override this
-_LOGGER.setLevel(logging.DEBUG)
 
 PLATFORMS: list[Platform] = [Platform.CONVERSATION]
 

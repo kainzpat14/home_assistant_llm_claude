@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
+from .const import MAX_MUSIC_SEARCH_RESULTS, VOLUME_SCALE_FACTOR
 from .music_utils import extract_room_name, fuzzy_match_room, normalize_room_name
 
 if TYPE_CHECKING:
@@ -28,8 +29,11 @@ class MusicAssistantHandler:
         """Check if Music Assistant integration is available."""
         return self.hass.services.has_service("music_assistant", "play_media")
 
-    async def get_players(self) -> list[dict[str, Any]]:
-        """Get all Music Assistant player entities with their state."""
+    async def load_and_cache_players(self) -> list[dict[str, Any]]:
+        """Load all Music Assistant player entities and cache room name mappings.
+
+        Note: This method has a side effect of populating _player_cache.
+        """
         players = []
 
         # Get entity registry
@@ -87,7 +91,7 @@ class MusicAssistantHandler:
 
     async def get_first_active_player(self) -> str | None:
         """Get the first player that is currently playing."""
-        players = await self.get_players()
+        players = await self.load_and_cache_players()
         for player in players:
             if player["state"] == "playing":
                 return player["entity_id"]
@@ -180,7 +184,7 @@ class MusicAssistantHandler:
         Returns:
             Currently playing information.
         """
-        players = await self.get_players()
+        players = await self.load_and_cache_players()
 
         if player:
             target_entity = self.resolve_player(player)
@@ -261,7 +265,7 @@ class MusicAssistantHandler:
                 await self.hass.services.async_call(
                     "media_player",
                     "volume_set",
-                    {"volume_level": volume_level / 100},
+                    {"volume_level": volume_level / VOLUME_SCALE_FACTOR},
                     target={"entity_id": target_entity},
                 )
             elif action in service_map:
@@ -317,7 +321,7 @@ class MusicAssistantHandler:
         try:
             service_data = {
                 "search": query,
-                "limit": min(limit, 50),
+                "limit": min(limit, MAX_MUSIC_SEARCH_RESULTS),
             }
 
             if media_type:

@@ -5,13 +5,14 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from homeassistant.components.conversation.models import ToolInput
+from homeassistant.helpers import llm
 from voluptuous_openapi import convert
 
 if TYPE_CHECKING:
     from homeassistant.components.conversation import ChatLog
 
 _LOGGER = logging.getLogger(__name__)
-_LOGGER.setLevel(logging.DEBUG)
 
 # The meta-tool that allows LLM to discover available tools
 QUERY_TOOLS_DEFINITION = {
@@ -247,7 +248,7 @@ class LLMToolManager:
         self.chat_log = chat_log
 
     @property
-    def llm_api(self):
+    def llm_api(self) -> llm.API | None:
         """Get the LLM API from the chat_log."""
         return self.chat_log.llm_api
 
@@ -376,8 +377,6 @@ class LLMToolManager:
 
         try:
             # Create tool input and execute via llm_api
-            from homeassistant.components.conversation.models import ToolInput
-
             tool_input = ToolInput(tool_name=tool_name, tool_args=arguments)
             result = await self.llm_api.async_call_tool(tool_input)
 

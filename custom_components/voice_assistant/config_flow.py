@@ -38,7 +38,6 @@ from .const import (
 from .llm import create_llm_provider
 
 _LOGGER = logging.getLogger(__name__)
-_LOGGER.setLevel(logging.DEBUG)
 
 DEFAULT_OPTIONS = {
     CONF_PROVIDER: PROVIDER_GROQ,
@@ -55,7 +54,7 @@ class VoiceAssistantConfigFlow(ConfigFlow, domain=DOMAIN):
 
     @staticmethod
     @callback
-    def async_get_options_flow(config_entry):
+    def async_get_options_flow(config_entry) -> OptionsFlow:
         """Get the options flow for this handler."""
         return VoiceAssistantOptionsFlow()
 

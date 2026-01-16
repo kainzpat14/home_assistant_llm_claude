@@ -11,7 +11,7 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN
+from .const import DEFAULT_FACT_EXTRACTION_TIMEOUT, DOMAIN
 from .storage import FactStore
 
 _LOGGER = logging.getLogger(__name__)
@@ -144,7 +144,10 @@ class ConversationManager:
         ]
 
         try:
-            response = await self._llm_provider.generate(messages, tools=None)
+            response = await asyncio.wait_for(
+                self._llm_provider.generate(messages, tools=None),
+                timeout=DEFAULT_FACT_EXTRACTION_TIMEOUT,
+            )
             content = response.get("content", "")
 
             # Parse JSON response
@@ -165,26 +168,12 @@ class ConversationManager:
             # Persist to storage
             await self.fact_store.async_save()
 
+        except asyncio.TimeoutError:
+            _LOGGER.warning("Fact extraction timed out after %d seconds", DEFAULT_FACT_EXTRACTION_TIMEOUT)
         except json.JSONDecodeError as err:
             _LOGGER.warning("Failed to parse facts JSON: %s", err)
         except Exception as err:
             _LOGGER.error("Error during fact extraction: %s", err)
-
-    def build_facts_prompt_section(self) -> str:
-        """Build a prompt section containing known facts."""
-        facts = self.fact_store.get_all_facts()
-        if not facts:
-            return ""
-
-        lines = ["\n\n**Known information about this user:**"]
-        for key, value in facts.items():
-            # Format the fact nicely
-            key_formatted = key.replace("_", " ").title()
-            if isinstance(value, list):
-                value = ", ".join(str(v) for v in value)
-            lines.append(f"- {key_formatted}: {value}")
-
-        return "\n".join(lines)
 
     async def start_cleanup_task(self) -> None:
         """Start background task to clean up expired sessions."""

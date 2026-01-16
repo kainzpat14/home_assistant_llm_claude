@@ -59,7 +59,6 @@ if TYPE_CHECKING:
     from .llm.base import BaseLLMProvider
 
 _LOGGER = logging.getLogger(__name__)
-_LOGGER.setLevel(logging.DEBUG)
 
 MAX_TOOL_ITERATIONS = 5  # Prevent infinite tool loops
 
@@ -696,7 +695,7 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                     source_player=arguments.get("source_player"),
                 )
             elif tool_name == "get_music_players":
-                players = await handler.get_players()
+                players = await handler.load_and_cache_players()
                 return {
                     "success": True,
                     "players": players,
