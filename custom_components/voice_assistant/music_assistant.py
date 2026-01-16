@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
+from .music_utils import extract_room_name, fuzzy_match_room, normalize_room_name
+
 if TYPE_CHECKING:
     from homeassistant.components.conversation import ChatLog
 
@@ -59,25 +61,10 @@ class MusicAssistantHandler:
                 })
 
                 # Cache room name mapping
-                room_name = self._extract_room_name(friendly_name, entity_id)
-                self._player_cache[room_name.lower()] = entity_id
+                room_name = extract_room_name(friendly_name, entity_id)
+                self._player_cache[normalize_room_name(room_name)] = entity_id
 
         return players
-
-    def _extract_room_name(self, friendly_name: str, entity_id: str) -> str:
-        """Extract room name from friendly name or entity_id."""
-        # Try friendly name first
-        if friendly_name:
-            # Remove common suffixes
-            for suffix in [" Speaker", " Player", " MA", " Music"]:
-                if friendly_name.endswith(suffix):
-                    return friendly_name[:-len(suffix)]
-            return friendly_name
-
-        # Fall back to entity_id parsing
-        # media_player.ma_living_room -> living room
-        name = entity_id.replace("media_player.", "").replace("ma_", "")
-        return name.replace("_", " ")
 
     def resolve_player(self, player_ref: str | None) -> str | None:
         """Resolve player reference (room name or entity_id) to entity_id.
@@ -95,17 +82,8 @@ class MusicAssistantHandler:
         if player_ref.startswith("media_player."):
             return player_ref
 
-        # Look up in cache
-        normalized = player_ref.lower().strip()
-        if normalized in self._player_cache:
-            return self._player_cache[normalized]
-
-        # Try fuzzy matching
-        for room_name, entity_id in self._player_cache.items():
-            if normalized in room_name or room_name in normalized:
-                return entity_id
-
-        return None
+        # Use fuzzy matching utility
+        return fuzzy_match_room(player_ref, self._player_cache)
 
     async def get_first_active_player(self) -> str | None:
         """Get the first player that is currently playing."""
