@@ -23,11 +23,13 @@ from .const import (
     CONF_ENABLE_FACT_LEARNING,
     CONF_ENABLE_MUSIC_ASSISTANT,
     CONF_ENABLE_STREAMING,
+    CONF_ENABLE_WEB_SEARCH,
     CONF_LLM_HASS_API,
     CONF_MAX_TOKENS,
     CONF_MODEL,
     CONF_PROVIDER,
     CONF_SYSTEM_PROMPT,
+    CONF_TAVILY_API_KEY,
     CONF_TEMPERATURE,
     CONTINUE_LISTENING_MARKER,
     DEFAULT_AUTO_CONTINUE_LISTENING,
@@ -35,6 +37,7 @@ from .const import (
     DEFAULT_ENABLE_FACT_LEARNING,
     DEFAULT_ENABLE_MUSIC_ASSISTANT,
     DEFAULT_ENABLE_STREAMING,
+    DEFAULT_ENABLE_WEB_SEARCH,
     DEFAULT_MAX_TOKENS,
     DEFAULT_SYSTEM_PROMPT,
     DEFAULT_TEMPERATURE,
@@ -44,6 +47,7 @@ from .conversation_manager import ConversationManager
 from .llm import create_llm_provider
 from .llm.base import StreamChunk
 from .music_assistant import MusicAssistantHandler
+from .tavily_search import TavilySearchHandler
 from .response_processor import (
     add_listening_instructions_to_prompt,
     process_response_for_listening,
@@ -92,6 +96,9 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         # Initialize Music Assistant handler
         self._music_handler: MusicAssistantHandler | None = None
 
+        # Initialize web search handler
+        self._web_search_handler: TavilySearchHandler | None = None
+
     def _get_config(self, key: str, default: Any = None) -> Any:
         """Get config value from options (preferred) or data (fallback).
 
@@ -123,6 +130,15 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         if self._music_handler is None:
             self._music_handler = MusicAssistantHandler(self.hass)
         return self._music_handler
+
+    @property
+    def web_search_handler(self) -> TavilySearchHandler | None:
+        """Get or create the web search handler."""
+        if self._web_search_handler is None:
+            tavily_api_key = self.entry.data.get(CONF_TAVILY_API_KEY)
+            if tavily_api_key:
+                self._web_search_handler = TavilySearchHandler(tavily_api_key)
+        return self._web_search_handler
 
     @property
     def supported_languages(self) -> list[str] | Literal["*"]:
@@ -198,8 +214,17 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
             and self.music_handler.is_available()
         )
 
-        # Start with meta-tools (optionally including music tools)
-        current_tools = LLMToolManager.get_initial_tools(include_music=include_music)
+        # Check if web search is enabled and has API key
+        include_web_search = (
+            self._get_config(CONF_ENABLE_WEB_SEARCH, DEFAULT_ENABLE_WEB_SEARCH)
+            and self.web_search_handler is not None
+        )
+
+        # Start with meta-tools (optionally including music and web search tools)
+        current_tools = LLMToolManager.get_initial_tools(
+            include_music=include_music,
+            include_web_search=include_web_search,
+        )
 
         # Build messages from chat_log content and add system prompt
         messages = self._build_messages(
@@ -360,7 +385,7 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
 
             # Categorize tool calls
             (query_tools_calls, query_facts_calls, learn_fact_calls,
-             music_tool_calls, ha_tool_calls) = tool_handlers.categorize_tool_calls(tool_calls)
+             music_tool_calls, web_search_calls, ha_tool_calls) = tool_handlers.categorize_tool_calls(tool_calls)
 
             # Add assistant message with tool calls to history
             messages.append({
@@ -382,6 +407,9 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
             )
             await tool_handlers.handle_music_tool_calls(
                 music_tool_calls, messages, chat_log, self._handle_music_tool
+            )
+            await tool_handlers.handle_web_search_calls(
+                web_search_calls, messages, chat_log, self._handle_web_search
             )
             await tool_handlers.handle_ha_tool_calls(
                 ha_tool_calls, messages, chat_log, user_input, accumulated_content,
@@ -475,7 +503,7 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
 
             # Categorize tool calls
             (query_tools_calls, query_facts_calls, learn_fact_calls,
-             music_tool_calls, ha_tool_calls) = tool_handlers.categorize_tool_calls(tool_calls)
+             music_tool_calls, web_search_calls, ha_tool_calls) = tool_handlers.categorize_tool_calls(tool_calls)
 
             # Add assistant message with tool calls to history for LLM context
             messages.append({
@@ -497,6 +525,9 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
             )
             await tool_handlers.handle_music_tool_calls(
                 music_tool_calls, messages, chat_log, self._handle_music_tool
+            )
+            await tool_handlers.handle_web_search_calls(
+                web_search_calls, messages, chat_log, self._handle_web_search
             )
             await tool_handlers.handle_ha_tool_calls(
                 ha_tool_calls, messages, chat_log, user_input, response.get("content", ""),
@@ -710,6 +741,39 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                 }
         except Exception as err:
             _LOGGER.error("Error handling music tool %s: %s", tool_name, err)
+            return {
+                "success": False,
+                "error": str(err),
+            }
+
+    async def _handle_web_search(
+        self,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Handle web search tool calls.
+
+        Args:
+            arguments: Tool arguments with query, max_results, search_depth.
+
+        Returns:
+            Result dictionary with search results.
+        """
+        handler = self.web_search_handler
+
+        if handler is None:
+            return {
+                "success": False,
+                "error": "Web search is not configured. Please add a Tavily API key in integration settings.",
+            }
+
+        try:
+            return await handler.search(
+                query=arguments.get("query", ""),
+                max_results=arguments.get("max_results", 5),
+                search_depth=arguments.get("search_depth", "basic"),
+            )
+        except Exception as err:
+            _LOGGER.error("Error handling web search: %s", err)
             return {
                 "success": False,
                 "error": str(err),

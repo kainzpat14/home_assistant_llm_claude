@@ -18,17 +18,20 @@ from .const import (
     CONF_ENABLE_FACT_LEARNING,
     CONF_ENABLE_MUSIC_ASSISTANT,
     CONF_ENABLE_STREAMING,
+    CONF_ENABLE_WEB_SEARCH,
     CONF_LLM_HASS_API,
     CONF_MAX_TOKENS,
     CONF_MODEL,
     CONF_PROVIDER,
     CONF_SYSTEM_PROMPT,
+    CONF_TAVILY_API_KEY,
     CONF_TEMPERATURE,
     DEFAULT_AUTO_CONTINUE_LISTENING,
     DEFAULT_CONVERSATION_TIMEOUT,
     DEFAULT_ENABLE_FACT_LEARNING,
     DEFAULT_ENABLE_MUSIC_ASSISTANT,
     DEFAULT_ENABLE_STREAMING,
+    DEFAULT_ENABLE_WEB_SEARCH,
     DEFAULT_MAX_TOKENS,
     DEFAULT_MODELS,
     DEFAULT_SYSTEM_PROMPT,
@@ -82,10 +85,14 @@ class VoiceAssistantConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors["base"] = "cannot_connect"
 
             if not errors:
-                # Store only API key in data, everything else in options
+                # Store API keys in data (sensitive), everything else in options
+                data = {CONF_API_KEY: user_input[CONF_API_KEY]}
+                if user_input.get(CONF_TAVILY_API_KEY):
+                    data[CONF_TAVILY_API_KEY] = user_input[CONF_TAVILY_API_KEY]
+
                 return self.async_create_entry(
                     title="Voice Assistant LLM",
-                    data={CONF_API_KEY: user_input[CONF_API_KEY]},
+                    data=data,
                     options=DEFAULT_OPTIONS,
                 )
 
@@ -94,6 +101,7 @@ class VoiceAssistantConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_API_KEY): str,
+                    vol.Optional(CONF_TAVILY_API_KEY): str,
                 }
             ),
             errors=errors,
@@ -205,6 +213,12 @@ class VoiceAssistantOptionsFlow(OptionsFlow):
                         CONF_ENABLE_MUSIC_ASSISTANT,
                         default=self.config_entry.options.get(
                             CONF_ENABLE_MUSIC_ASSISTANT, DEFAULT_ENABLE_MUSIC_ASSISTANT
+                        ),
+                    ): bool,
+                    vol.Optional(
+                        CONF_ENABLE_WEB_SEARCH,
+                        default=self.config_entry.options.get(
+                            CONF_ENABLE_WEB_SEARCH, DEFAULT_ENABLE_WEB_SEARCH
                         ),
                     ): bool,
                     vol.Optional(

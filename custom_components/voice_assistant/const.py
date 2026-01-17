@@ -53,6 +53,11 @@ DEFAULT_AUTO_CONTINUE_LISTENING = False
 CONF_ENABLE_MUSIC_ASSISTANT = "enable_music_assistant"
 DEFAULT_ENABLE_MUSIC_ASSISTANT = True
 
+# Web Search (Tavily) settings
+CONF_TAVILY_API_KEY = "tavily_api_key"
+CONF_ENABLE_WEB_SEARCH = "enable_web_search"
+DEFAULT_ENABLE_WEB_SEARCH = False
+
 # Marker that LLM can use to request continued listening
 CONTINUE_LISTENING_MARKER = "[CONTINUE_LISTENING]"
 
@@ -96,4 +101,11 @@ You have access to Home Assistant through a dynamic tool system. Initially, you 
 **Token Efficiency:**
 - Only query for tools when you actually need them
 - Only query facts when you need user context
-- For simple questions that don't require Home Assistant interaction, just answer directly"""
+- For simple questions that don't require Home Assistant interaction, just answer directly
+
+**Web Search:**
+- If web search is enabled, you have access to a `web_search` tool for real-time information
+- Use web search ONLY for factual queries that require current information you don't have
+- Examples: current weather, news, sports scores, stock prices, recent events
+- DO NOT use web search for general knowledge questions you can answer directly
+- DO NOT use web search for home automation tasks - use Home Assistant tools instead"""
