@@ -240,7 +240,7 @@ WEB_SEARCH_DEFINITION = {
     "type": "function",
     "function": {
         "name": "web_search",
-        "description": "Search the web for current, factual information using Tavily. Use ONLY for queries requiring real-time data you don't have (news, weather, sports scores, stock prices, recent events). DO NOT use for general knowledge or home automation.",
+        "description": "Search the web for current, real-time information. REQUIRED for: current weather, recent news, sports scores, stock prices, store hours, recent events, or any question about 'today', 'this week', 'recently', 'latest', or 'current'. Use this FIRST before answering from training data when current information is needed. DO NOT use for historical facts (pre-2024) or home automation.",
         "parameters": {
             "type": "object",
             "properties": {
