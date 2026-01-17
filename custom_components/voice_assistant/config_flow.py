@@ -125,6 +125,25 @@ class VoiceAssistantOptionsFlow(OptionsFlow):
             if not user_input.get(CONF_LLM_HASS_API):
                 user_input.pop(CONF_LLM_HASS_API, None)
 
+            # Handle Tavily API key separately (stored in data, not options)
+            tavily_api_key = user_input.pop(CONF_TAVILY_API_KEY, None)
+
+            # Update entry.data with Tavily API key if provided
+            if tavily_api_key:
+                new_data = dict(self.config_entry.data)
+                new_data[CONF_TAVILY_API_KEY] = tavily_api_key
+                self.hass.config_entries.async_update_entry(
+                    self.config_entry, data=new_data
+                )
+            elif CONF_TAVILY_API_KEY in self.config_entry.data:
+                # If field was cleared, remove from data
+                if tavily_api_key == "":
+                    new_data = dict(self.config_entry.data)
+                    new_data.pop(CONF_TAVILY_API_KEY, None)
+                    self.hass.config_entries.async_update_entry(
+                        self.config_entry, data=new_data
+                    )
+
             # Validate the provider/model combination if changed
             try:
                 provider = create_llm_provider(
@@ -221,6 +240,10 @@ class VoiceAssistantOptionsFlow(OptionsFlow):
                             CONF_ENABLE_WEB_SEARCH, DEFAULT_ENABLE_WEB_SEARCH
                         ),
                     ): bool,
+                    vol.Optional(
+                        CONF_TAVILY_API_KEY,
+                        description={"suggested_value": self.config_entry.data.get(CONF_TAVILY_API_KEY, "")},
+                    ): str,
                     vol.Optional(
                         CONF_SYSTEM_PROMPT,
                         description={"suggested_value": self.config_entry.options.get(
