@@ -85,7 +85,6 @@ class StreamingBufferProcessor:
         async for chunk in chunk_iterator:
             # Process content chunks
             if chunk.content:
-                _LOGGER.debug("Received chunk: %r (length: %d)", chunk.content, len(chunk.content))
                 self._accumulated_content += chunk.content
                 self._chunk_buffer += chunk.content
 
@@ -98,7 +97,6 @@ class StreamingBufferProcessor:
                     clean_buffer = self._chunk_buffer.replace(self.marker, "")
                     if clean_buffer:
                         yield {"content": clean_buffer}
-                        _LOGGER.debug("Yielded buffer with marker removed: %r", clean_buffer)
 
                     # Clear buffer since we've yielded it
                     self._chunk_buffer = ""
@@ -116,7 +114,6 @@ class StreamingBufferProcessor:
                     # Buffer doesn't contain marker or partial marker, safe to yield
                     if self._chunk_buffer:
                         yield {"content": self._chunk_buffer}
-                        _LOGGER.debug("No marker risk, yielding buffer: %r", self._chunk_buffer)
                     self._chunk_buffer = ""
 
             # Capture tool calls from final chunk
@@ -127,7 +124,6 @@ class StreamingBufferProcessor:
         # Yield any remaining buffer content (marker wasn't completed)
         if self._chunk_buffer and not self._marker_found:
             yield {"content": self._chunk_buffer}
-            _LOGGER.debug("End of stream, yielding remaining buffer: %r", self._chunk_buffer)
 
         _LOGGER.debug("Finished streaming, accumulated content length: %d", len(self._accumulated_content))
         display_content = (

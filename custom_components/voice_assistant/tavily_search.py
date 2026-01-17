@@ -64,6 +64,13 @@ class TavilySearchHandler:
             if search_depth not in ["basic", "advanced"]:
                 search_depth = "basic"
 
+            _LOGGER.debug(
+                "Performing web search: query=%r, max_results=%d, search_depth=%s",
+                query,
+                max_results,
+                search_depth,
+            )
+
             # Perform search (note: tavily client is synchronous)
             # We'll wrap it to maintain async interface
             import asyncio
@@ -86,6 +93,12 @@ class TavilySearchHandler:
                     "content": item.get("content", ""),
                     "score": item.get("score", 0.0),
                 })
+
+            _LOGGER.debug(
+                "Web search completed successfully: %d results returned for query %r",
+                len(results),
+                query,
+            )
 
             return {
                 "success": True,
