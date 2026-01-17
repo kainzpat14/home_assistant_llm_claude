@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from homeassistant.components.conversation.models import ToolInput
 from homeassistant.helpers import llm
+from homeassistant.util import ulid
 from voluptuous_openapi import convert
 
 if TYPE_CHECKING:
@@ -377,7 +377,11 @@ class LLMToolManager:
 
         try:
             # Create tool input and execute via llm_api
-            tool_input = ToolInput(tool_name=tool_name, tool_args=arguments)
+            tool_input = llm.ToolInput(
+                id=ulid.ulid_now(),
+                tool_name=tool_name,
+                tool_args=arguments,
+            )
             result = await self.llm_api.async_call_tool(tool_input)
 
             return {"success": True, "result": result}
