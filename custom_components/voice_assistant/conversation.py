@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 import json
 import logging
 from typing import TYPE_CHECKING, Any, AsyncIterator, Literal
@@ -799,6 +800,10 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         if not self._get_config(CONF_AUTO_CONTINUE_LISTENING, DEFAULT_AUTO_CONTINUE_LISTENING):
             full_system_prompt = add_listening_instructions_to_prompt(system_prompt)
             _LOGGER.debug("Added listening control instructions to system prompt")
+
+        # Add current date to system prompt
+        current_date = datetime.now().strftime("%Y-%m-%d")
+        full_system_prompt = f"{full_system_prompt}\n\nCurrent date: {current_date}"
 
         # Always use our own system prompt
         messages.append({"role": "system", "content": full_system_prompt})
