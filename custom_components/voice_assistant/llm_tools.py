@@ -240,7 +240,7 @@ WEB_SEARCH_DEFINITION = {
     "type": "function",
     "function": {
         "name": "web_search",
-        "description": "Search the web for current, real-time information. REQUIRED for: current weather, recent news, sports scores, stock prices, store hours, recent events, or any question about 'today', 'this week', 'recently', 'latest', or 'current'. Use this FIRST before answering from training data when current information is needed. DO NOT use for historical facts (pre-2024) or home automation.",
+        "description": "Search the web for factual information. Use this for ANY question where you're not 100% confident in your answer - including current events, product availability, detailed facts, or specific information. When in doubt, search first. Only skip for basic math, definitions, or home automation tasks.",
         "parameters": {
             "type": "object",
             "properties": {
