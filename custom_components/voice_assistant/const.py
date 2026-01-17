@@ -56,6 +56,12 @@ DEFAULT_ENABLE_MUSIC_ASSISTANT = True
 # Marker that LLM can use to request continued listening
 CONTINUE_LISTENING_MARKER = "[CONTINUE_LISTENING]"
 
+# Timeout and limit constants
+DEFAULT_API_TIMEOUT = 30  # seconds for API calls
+DEFAULT_FACT_EXTRACTION_TIMEOUT = 30  # seconds for fact extraction
+MAX_MUSIC_SEARCH_RESULTS = 50  # maximum results from music search
+VOLUME_SCALE_FACTOR = 100  # volume is 0-1, UI is 0-100
+
 DEFAULT_SYSTEM_PROMPT = """You are a helpful voice-controlled home assistant that can control smart home devices and answer questions.
 
 **IMPORTANT: This is a VOICE interface - users are speaking to you and hearing your responses.**

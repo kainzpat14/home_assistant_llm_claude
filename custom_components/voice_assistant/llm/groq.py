@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
 from groq import AsyncGroq
 
+from ..const import DEFAULT_API_TIMEOUT
 from .base import BaseLLMProvider, StreamChunk
 
 if TYPE_CHECKING:
     from groq.types.chat import ChatCompletion
 
 _LOGGER = logging.getLogger(__name__)
-_LOGGER.setLevel(logging.DEBUG)
 
 
 class GroqProvider(BaseLLMProvider):
@@ -25,6 +26,7 @@ class GroqProvider(BaseLLMProvider):
         model: str = "llama-3.3-70b-versatile",
         temperature: float = 0.7,
         max_tokens: int = 1024,
+        timeout: float = DEFAULT_API_TIMEOUT,
         **kwargs: Any,
     ) -> None:
         """Initialize the Groq provider."""
@@ -35,6 +37,7 @@ class GroqProvider(BaseLLMProvider):
             max_tokens=max_tokens,
         )
         self._client: AsyncGroq | None = None
+        self.timeout = timeout
 
     @property
     def client(self) -> AsyncGroq:
@@ -42,6 +45,16 @@ class GroqProvider(BaseLLMProvider):
         if self._client is None:
             self._client = AsyncGroq(api_key=self.api_key)
         return self._client
+
+    async def async_close(self) -> None:
+        """Close the Groq client and cleanup resources."""
+        if self._client is not None:
+            try:
+                await self._client.close()
+            except Exception as err:
+                _LOGGER.warning("Error closing Groq client: %s", err)
+            finally:
+                self._client = None
 
     async def generate(
         self,
@@ -69,7 +82,10 @@ class GroqProvider(BaseLLMProvider):
             kwargs["tool_choice"] = "auto"
 
         try:
-            response: ChatCompletion = await self.client.chat.completions.create(**kwargs)
+            response: ChatCompletion = await asyncio.wait_for(
+                self.client.chat.completions.create(**kwargs),
+                timeout=self.timeout,
+            )
             message = response.choices[0].message
 
             result: dict[str, Any] = {
@@ -92,6 +108,9 @@ class GroqProvider(BaseLLMProvider):
 
             return result
 
+        except asyncio.TimeoutError:
+            _LOGGER.error("Groq API request timed out after %d seconds", self.timeout)
+            raise
         except Exception as err:
             _LOGGER.error("Groq API error: %s", err)
             raise
@@ -123,12 +142,18 @@ class GroqProvider(BaseLLMProvider):
             kwargs["tool_choice"] = "auto"
 
         try:
-            stream = await self.client.chat.completions.create(**kwargs)
+            stream = await asyncio.wait_for(
+                self.client.chat.completions.create(**kwargs),
+                timeout=self.timeout,
+            )
 
             async for chunk in stream:
                 if chunk.choices and chunk.choices[0].delta.content:
                     yield chunk.choices[0].delta.content
 
+        except asyncio.TimeoutError:
+            _LOGGER.error("Groq streaming request timed out after %d seconds", self.timeout)
+            raise
         except Exception as err:
             _LOGGER.error("Groq streaming error: %s", err)
             raise
@@ -159,10 +184,14 @@ class GroqProvider(BaseLLMProvider):
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
 
+        # Use lists for efficient string accumulation
         accumulated_tool_calls: list[dict[str, Any]] = []
 
         try:
-            stream = await self.client.chat.completions.create(**kwargs)
+            stream = await asyncio.wait_for(
+                self.client.chat.completions.create(**kwargs),
+                timeout=self.timeout,
+            )
 
             async for chunk in stream:
                 choice = chunk.choices[0] if chunk.choices else None
@@ -184,24 +213,39 @@ class GroqProvider(BaseLLMProvider):
                             accumulated_tool_calls.append({
                                 "id": "",
                                 "type": "function",
-                                "function": {"name": "", "arguments": ""},
+                                "function": {"name": [], "arguments": []},
                             })
 
                         if tc_delta.id:
                             accumulated_tool_calls[idx]["id"] = tc_delta.id
                         if tc_delta.function:
                             if tc_delta.function.name:
-                                accumulated_tool_calls[idx]["function"]["name"] += tc_delta.function.name
+                                accumulated_tool_calls[idx]["function"]["name"].append(tc_delta.function.name)
                             if tc_delta.function.arguments:
-                                accumulated_tool_calls[idx]["function"]["arguments"] += tc_delta.function.arguments
+                                accumulated_tool_calls[idx]["function"]["arguments"].append(tc_delta.function.arguments)
 
                 # Check for finish reason
                 if choice.finish_reason:
+                    # Join accumulated strings
+                    finalized_tool_calls = []
+                    for tc in accumulated_tool_calls:
+                        finalized_tool_calls.append({
+                            "id": tc["id"],
+                            "type": tc["type"],
+                            "function": {
+                                "name": "".join(tc["function"]["name"]),
+                                "arguments": "".join(tc["function"]["arguments"]),
+                            },
+                        })
+
                     yield StreamChunk(
-                        tool_calls=accumulated_tool_calls if accumulated_tool_calls else None,
+                        tool_calls=finalized_tool_calls if finalized_tool_calls else None,
                         is_final=True,
                     )
 
+        except asyncio.TimeoutError:
+            _LOGGER.error("Groq streaming with tools request timed out after %d seconds", self.timeout)
+            raise
         except Exception as err:
             _LOGGER.error("Groq streaming error: %s", err)
             raise
@@ -213,12 +257,18 @@ class GroqProvider(BaseLLMProvider):
             True if valid, False otherwise.
         """
         try:
-            await self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": "hi"}],
-                max_tokens=1,
+            await asyncio.wait_for(
+                self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[{"role": "user", "content": "hi"}],
+                    max_tokens=1,
+                ),
+                timeout=self.timeout,
             )
             return True
+        except asyncio.TimeoutError:
+            _LOGGER.warning("Groq API key validation timed out after %d seconds", self.timeout)
+            return False
         except Exception as err:
             _LOGGER.warning("Groq API key validation failed: %s", err)
             return False

@@ -50,6 +50,8 @@ from .response_processor import (
 )
 from .llm_tools import LLMToolManager
 from .storage import FactStore
+from . import tool_handlers
+from .streaming_buffer import StreamingBufferProcessor
 
 if TYPE_CHECKING:
     from homeassistant.components.conversation import ChatLog
@@ -57,7 +59,6 @@ if TYPE_CHECKING:
     from .llm.base import BaseLLMProvider
 
 _LOGGER = logging.getLogger(__name__)
-_LOGGER.setLevel(logging.DEBUG)
 
 MAX_TOOL_ITERATIONS = 5  # Prevent infinite tool loops
 
@@ -283,13 +284,15 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         original_content_holder = []
 
         # Use async_add_delta_content_stream to handle streaming
-        async for content_obj in chat_log.async_add_delta_content_stream(
-            self.entity_id,
-            self._stream_response_with_tools(
-                messages, current_tools, tool_manager, chat_log, user_input, original_content_holder
-            ),
-        ):
-            pass  # Generator handles all streaming internally
+        # The generator handles all streaming internally; we just need to consume it
+        await self._consume_stream(
+            chat_log.async_add_delta_content_stream(
+                self.entity_id,
+                self._stream_response_with_tools(
+                    messages, current_tools, tool_manager, chat_log, user_input, original_content_holder
+                ),
+            )
+        )
 
         # Track ORIGINAL assistant message in session for fact learning (preserves marker for context)
         if original_content_holder:
@@ -324,54 +327,21 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         for iteration in range(MAX_TOOL_ITERATIONS):
             _LOGGER.debug("Streaming iteration %d starting", iteration + 1)
 
-            accumulated_content = ""
-            chunk_buffer = ""  # Buffer for chunks that might contain partial marker
-            tool_calls = None
-            marker_found = False
+            # Create buffer processor for this iteration
+            buffer_processor = StreamingBufferProcessor(CONTINUE_LISTENING_MARKER)
 
-            # Stream from LLM and accumulate
+            # Stream from LLM using buffer processor
             _LOGGER.debug("Starting to stream chunks from LLM provider")
-            async for chunk in self.provider.generate_stream_with_tools(messages, current_tools):
-                if chunk.content:
-                    _LOGGER.debug("Received chunk: %r (length: %d)", chunk.content, len(chunk.content))
-                    accumulated_content += chunk.content
-                    chunk_buffer += chunk.content
+            async for content_delta in buffer_processor.process_chunks(
+                self.provider.generate_stream_with_tools(messages, current_tools)
+            ):
+                yield content_delta
 
-                    # Check if we've completed the marker in the buffer
-                    if CONTINUE_LISTENING_MARKER in chunk_buffer:
-                        marker_found = True
-                        _LOGGER.info("*** FOUND COMPLETE CONTINUE_LISTENING MARKER in buffer! ***")
-
-                        # Remove marker from buffer and yield everything
-                        clean_buffer = chunk_buffer.replace(CONTINUE_LISTENING_MARKER, "")
-                        if clean_buffer:
-                            yield {"content": clean_buffer}
-                            _LOGGER.debug("Yielded buffer with marker removed: %r", clean_buffer)
-
-                        # Clear buffer since we've yielded it
-                        chunk_buffer = ""
-                    elif self._buffer_might_contain_partial_marker(chunk_buffer):
-                        # Buffer might contain start of marker, hold off on yielding
-                        _LOGGER.debug("Buffer might contain partial marker, holding: %r", chunk_buffer[-20:] if len(chunk_buffer) > 20 else chunk_buffer)
-                    else:
-                        # Buffer doesn't contain marker or partial marker, safe to yield
-                        if chunk_buffer:
-                            yield {"content": chunk_buffer}
-                            _LOGGER.debug("No marker risk, yielding buffer: %r", chunk_buffer)
-                        chunk_buffer = ""
-
-                if chunk.is_final and chunk.tool_calls:
-                    tool_calls = chunk.tool_calls
-                    _LOGGER.debug("Final chunk received with %d tool calls", len(tool_calls))
-
-            # Yield any remaining buffer content (marker wasn't completed)
-            if chunk_buffer and not marker_found:
-                yield {"content": chunk_buffer}
-                _LOGGER.debug("End of stream, yielding remaining buffer: %r", chunk_buffer)
-
-            _LOGGER.debug("Finished streaming, accumulated content length: %d", len(accumulated_content))
-            _LOGGER.debug("Full accumulated content: %r", accumulated_content[:200] + "..." if len(accumulated_content) > 200 else accumulated_content)
-            _LOGGER.debug("Marker found: %s", marker_found)
+            # Get the processing result
+            result = buffer_processor.get_result()
+            accumulated_content = result.accumulated_content
+            tool_calls = result.tool_calls
+            marker_found = result.marker_found
 
             # If no tool calls, we're done
             if not tool_calls:
@@ -379,12 +349,8 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                 original_content_holder.append(accumulated_content)
 
                 # If marker was present, ensure response ends with ?
-                if marker_found:
-                    # Remove marker from accumulated content for checking
-                    clean_content = accumulated_content.replace(CONTINUE_LISTENING_MARKER, "").strip()
-                    if not clean_content.endswith("?"):
-                        yield {"content": "?"}
-                        _LOGGER.debug("Added question mark after streaming (CONTINUE_LISTENING marker present)")
+                async for content_delta in buffer_processor.finalize_response():
+                    yield content_delta
 
                 _LOGGER.debug("No tool calls, streaming complete")
                 return
@@ -392,26 +358,9 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
             # Handle tool calls (not streamed to user)
             _LOGGER.info("Processing %d tool call(s) in iteration %d", len(tool_calls), iteration + 1)
 
-            # Separate meta-tools (query_tools, query_facts, learn_fact, music) from HA tools
-            query_tools_calls = []
-            query_facts_calls = []
-            learn_fact_calls = []
-            music_tool_calls = []
-            ha_tool_calls = []
-
-            for tool_call in tool_calls:
-                tool_name = tool_call["function"]["name"]
-                if tool_name == "query_tools":
-                    query_tools_calls.append(tool_call)
-                elif tool_name == "query_facts":
-                    query_facts_calls.append(tool_call)
-                elif tool_name == "learn_fact":
-                    learn_fact_calls.append(tool_call)
-                elif tool_name in ["play_music", "get_now_playing", "control_playback",
-                                     "search_music", "transfer_music", "get_music_players"]:
-                    music_tool_calls.append(tool_call)
-                else:
-                    ha_tool_calls.append(tool_call)
+            # Categorize tool calls
+            (query_tools_calls, query_facts_calls, learn_fact_calls,
+             music_tool_calls, ha_tool_calls) = tool_handlers.categorize_tool_calls(tool_calls)
 
             # Add assistant message with tool calls to history
             messages.append({
@@ -420,141 +369,24 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                 "tool_calls": tool_calls,
             })
 
-            # Handle query_tools
-            if query_tools_calls:
-                query_tools_summary = []
-                for tool_call in query_tools_calls:
-                    arguments = json.loads(tool_call["function"]["arguments"])
-                    _LOGGER.info("Handling query_tools: %s", arguments)
-
-                    result = self._handle_query_tools(arguments, current_tools, tool_manager)
-
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call["id"],
-                        "content": json.dumps(result),
-                    })
-
-                    domain_filter = arguments.get("domain", "all domains")
-                    if result.get("success"):
-                        tools_found = result.get("result", {}).get("tools", [])
-                        query_tools_summary.append(
-                            f"Discovered {len(tools_found)} tools for {domain_filter}"
-                        )
-
-                if query_tools_summary:
-                    summary_content = AssistantContent(
-                        agent_id=DOMAIN,
-                        content="\n".join(query_tools_summary),
-                    )
-                    chat_log.async_add_assistant_content_without_tools(summary_content)
-
-            # Handle query_facts
-            if query_facts_calls:
-                query_facts_summary = []
-                for tool_call in query_facts_calls:
-                    arguments = json.loads(tool_call["function"]["arguments"])
-                    _LOGGER.info("Handling query_facts: %s", arguments)
-
-                    result = self._handle_query_facts(arguments)
-
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call["id"],
-                        "content": json.dumps(result),
-                    })
-
-                    category_filter = arguments.get("category", "all categories")
-                    if result.get("success"):
-                        facts_found = result.get("facts", {})
-                        query_facts_summary.append(
-                            f"Retrieved {len(facts_found)} facts for {category_filter}"
-                        )
-
-                if query_facts_summary:
-                    summary_content = AssistantContent(
-                        agent_id=DOMAIN,
-                        content="\n".join(query_facts_summary),
-                    )
-                    chat_log.async_add_assistant_content_without_tools(summary_content)
-
-            # Handle learn_fact
-            if learn_fact_calls:
-                learn_fact_summary = []
-                for tool_call in learn_fact_calls:
-                    arguments = json.loads(tool_call["function"]["arguments"])
-                    _LOGGER.info("Handling learn_fact: %s", arguments)
-
-                    result = await self._handle_learn_fact(arguments)
-
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call["id"],
-                        "content": json.dumps(result),
-                    })
-
-                    if result.get("success"):
-                        key = arguments.get("key", "unknown")
-                        learn_fact_summary.append(
-                            f"Learned fact: {key}"
-                        )
-
-                if learn_fact_summary:
-                    summary_content = AssistantContent(
-                        agent_id=DOMAIN,
-                        content="\n".join(learn_fact_summary),
-                    )
-                    chat_log.async_add_assistant_content_without_tools(summary_content)
-
-            # Handle music tools
-            if music_tool_calls:
-                music_summary = []
-                for tool_call in music_tool_calls:
-                    tool_name = tool_call["function"]["name"]
-                    arguments = json.loads(tool_call["function"]["arguments"])
-                    _LOGGER.info("Handling music tool %s: %s", tool_name, arguments)
-
-                    result = await self._handle_music_tool(tool_name, arguments)
-
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call["id"],
-                        "content": json.dumps(result),
-                    })
-
-                    if result.get("success"):
-                        music_summary.append(result.get("message", f"Executed {tool_name}"))
-
-                if music_summary:
-                    summary_content = AssistantContent(
-                        agent_id=DOMAIN,
-                        content="\n".join(music_summary),
-                    )
-                    chat_log.async_add_assistant_content_without_tools(summary_content)
-
-            # Handle HA tools
-            if ha_tool_calls:
-                _LOGGER.info("Processing %d HA tool call(s)", len(ha_tool_calls))
-
-                tool_inputs = self._convert_tool_calls_to_inputs(ha_tool_calls, user_input)
-
-                assistant_content = AssistantContent(
-                    agent_id=DOMAIN,
-                    content=accumulated_content,
-                    tool_calls=tool_inputs,
-                )
-
-                async for tool_result in chat_log.async_add_assistant_content(assistant_content):
-                    _LOGGER.info(
-                        "Tool %s executed",
-                        tool_result.tool_name,
-                    )
-
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_result.tool_call_id,
-                        "content": json.dumps(tool_result.tool_result),
-                    })
+            # Handle each type of tool call using shared helper functions
+            await tool_handlers.handle_query_tools_calls(
+                query_tools_calls, current_tools, tool_manager, messages, chat_log,
+                self._handle_query_tools
+            )
+            await tool_handlers.handle_query_facts_calls(
+                query_facts_calls, messages, chat_log, self._handle_query_facts
+            )
+            await tool_handlers.handle_learn_fact_calls(
+                learn_fact_calls, messages, chat_log, self._handle_learn_fact
+            )
+            await tool_handlers.handle_music_tool_calls(
+                music_tool_calls, messages, chat_log, self._handle_music_tool
+            )
+            await tool_handlers.handle_ha_tool_calls(
+                ha_tool_calls, messages, chat_log, user_input, accumulated_content,
+                self._convert_tool_calls_to_inputs
+            )
 
         # Max iterations reached
         # Store whatever content we accumulated for session tracking
@@ -641,26 +473,9 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
             tool_calls = response["tool_calls"]
             _LOGGER.info("Received %d tool call(s) in iteration %d", len(tool_calls), iteration + 1)
 
-            # Separate meta-tools (query_tools, query_facts, learn_fact, music) from real HA tools
-            query_tools_calls = []
-            query_facts_calls = []
-            learn_fact_calls = []
-            music_tool_calls = []
-            ha_tool_calls = []
-
-            for tool_call in tool_calls:
-                tool_name = tool_call["function"]["name"]
-                if tool_name == "query_tools":
-                    query_tools_calls.append(tool_call)
-                elif tool_name == "query_facts":
-                    query_facts_calls.append(tool_call)
-                elif tool_name == "learn_fact":
-                    learn_fact_calls.append(tool_call)
-                elif tool_name in ["play_music", "get_now_playing", "control_playback",
-                                     "search_music", "transfer_music", "get_music_players"]:
-                    music_tool_calls.append(tool_call)
-                else:
-                    ha_tool_calls.append(tool_call)
+            # Categorize tool calls
+            (query_tools_calls, query_facts_calls, learn_fact_calls,
+             music_tool_calls, ha_tool_calls) = tool_handlers.categorize_tool_calls(tool_calls)
 
             # Add assistant message with tool calls to history for LLM context
             messages.append({
@@ -669,197 +484,28 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                 "tool_calls": tool_calls,
             })
 
-            # Handle query_tools locally (not in chat_log - it's an internal meta-tool)
-            if query_tools_calls:
-                query_tools_summary = []
-                for tool_call in query_tools_calls:
-                    arguments = json.loads(tool_call["function"]["arguments"])
-                    _LOGGER.info("Handling query_tools with args: %s", arguments)
-
-                    result = self._handle_query_tools(arguments, current_tools, tool_manager)
-
-                    # Add result to messages for LLM
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call["id"],
-                        "content": json.dumps(result),
-                    })
-
-                    # Build summary for chat_log
-                    domain_filter = arguments.get("domain", "all domains")
-                    if result.get("success"):
-                        tools_found = result.get("result", {}).get("tools", [])
-                        query_tools_summary.append(
-                            f"Discovered {len(tools_found)} tools for {domain_filter}"
-                        )
-
-                # Add a message to chat_log describing what query_tools did
-                if query_tools_summary:
-                    summary_content = AssistantContent(
-                        agent_id=DOMAIN,
-                        content="\n".join(query_tools_summary),
-                    )
-                    chat_log.async_add_assistant_content_without_tools(summary_content)
-                    _LOGGER.debug("Added query_tools summary to chat_log")
-
-            # Handle query_facts locally (not in chat_log - it's an internal meta-tool)
-            if query_facts_calls:
-                query_facts_summary = []
-                for tool_call in query_facts_calls:
-                    arguments = json.loads(tool_call["function"]["arguments"])
-                    _LOGGER.info("Handling query_facts with args: %s", arguments)
-
-                    result = self._handle_query_facts(arguments)
-
-                    # Add result to messages for LLM
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call["id"],
-                        "content": json.dumps(result),
-                    })
-
-                    # Build summary for chat_log
-                    category_filter = arguments.get("category", "all categories")
-                    if result.get("success"):
-                        facts_found = result.get("facts", {})
-                        query_facts_summary.append(
-                            f"Retrieved {len(facts_found)} facts for {category_filter}"
-                        )
-
-                # Add a message to chat_log describing what query_facts did
-                if query_facts_summary:
-                    summary_content = AssistantContent(
-                        agent_id=DOMAIN,
-                        content="\n".join(query_facts_summary),
-                    )
-                    chat_log.async_add_assistant_content_without_tools(summary_content)
-                    _LOGGER.debug("Added query_facts summary to chat_log")
-
-            # Handle learn_fact locally (not in chat_log - it's an internal meta-tool)
-            if learn_fact_calls:
-                learn_fact_summary = []
-                for tool_call in learn_fact_calls:
-                    arguments = json.loads(tool_call["function"]["arguments"])
-                    _LOGGER.info("Handling learn_fact with args: %s", arguments)
-
-                    result = await self._handle_learn_fact(arguments)
-
-                    # Add result to messages for LLM
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call["id"],
-                        "content": json.dumps(result),
-                    })
-
-                    # Build summary for chat_log
-                    if result.get("success"):
-                        key = arguments.get("key", "unknown")
-                        learn_fact_summary.append(
-                            f"Learned fact: {key}"
-                        )
-
-                # Add a message to chat_log describing what learn_fact did
-                if learn_fact_summary:
-                    summary_content = AssistantContent(
-                        agent_id=DOMAIN,
-                        content="\n".join(learn_fact_summary),
-                    )
-                    chat_log.async_add_assistant_content_without_tools(summary_content)
-                    _LOGGER.debug("Added learn_fact summary to chat_log")
-
-            # Handle music tools locally (not in chat_log - they're internal meta-tools)
-            if music_tool_calls:
-                music_summary = []
-                for tool_call in music_tool_calls:
-                    tool_name = tool_call["function"]["name"]
-                    arguments = json.loads(tool_call["function"]["arguments"])
-                    _LOGGER.info("Handling music tool %s with args: %s", tool_name, arguments)
-
-                    result = await self._handle_music_tool(tool_name, arguments)
-
-                    # Add result to messages for LLM
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call["id"],
-                        "content": json.dumps(result),
-                    })
-
-                    # Build summary for chat_log
-                    if result.get("success"):
-                        music_summary.append(result.get("message", f"Executed {tool_name}"))
-
-                # Add a message to chat_log describing what music tools did
-                if music_summary:
-                    summary_content = AssistantContent(
-                        agent_id=DOMAIN,
-                        content="\n".join(music_summary),
-                    )
-                    chat_log.async_add_assistant_content_without_tools(summary_content)
-                    _LOGGER.debug("Added music tool summary to chat_log")
-
-            # Handle real HA tools through chat_log
-            if ha_tool_calls:
-                _LOGGER.info("Processing %d Home Assistant tool call(s)", len(ha_tool_calls))
-
-                # Convert to ToolInput objects
-                tool_inputs = self._convert_tool_calls_to_inputs(ha_tool_calls, user_input)
-
-                # Create AssistantContent with tool calls
-                assistant_content = AssistantContent(
-                    agent_id=DOMAIN,
-                    content=response.get("content"),
-                    tool_calls=tool_inputs,
-                )
-
-                _LOGGER.debug(
-                    "Adding assistant content to chat_log with %d tool call(s)",
-                    len(tool_inputs),
-                )
-
-                # Add to chat_log and execute tools
-                # This returns an async generator of ToolResultContent
-                async for tool_result in chat_log.async_add_assistant_content(assistant_content):
-                    _LOGGER.info(
-                        "Tool %s executed with result (success: %s)",
-                        tool_result.tool_name,
-                        "data" in tool_result.tool_result if isinstance(tool_result.tool_result, dict) else "unknown",
-                    )
-
-                    # Add tool result to messages for next LLM iteration
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_result.tool_call_id,
-                        "content": json.dumps(tool_result.tool_result),
-                    })
+            # Handle each type of tool call using shared helper functions
+            await tool_handlers.handle_query_tools_calls(
+                query_tools_calls, current_tools, tool_manager, messages, chat_log,
+                self._handle_query_tools
+            )
+            await tool_handlers.handle_query_facts_calls(
+                query_facts_calls, messages, chat_log, self._handle_query_facts
+            )
+            await tool_handlers.handle_learn_fact_calls(
+                learn_fact_calls, messages, chat_log, self._handle_learn_fact
+            )
+            await tool_handlers.handle_music_tool_calls(
+                music_tool_calls, messages, chat_log, self._handle_music_tool
+            )
+            await tool_handlers.handle_ha_tool_calls(
+                ha_tool_calls, messages, chat_log, user_input, response.get("content", ""),
+                self._convert_tool_calls_to_inputs
+            )
 
         # If we hit max iterations, return last content or error
         _LOGGER.warning("Hit max tool iterations (%d)", MAX_TOOL_ITERATIONS)
         return response.get("content", "I encountered an issue processing your request.")
-
-    def _buffer_might_contain_partial_marker(self, buffer: str) -> bool:
-        """Check if buffer ends with a partial match of the CONTINUE_LISTENING marker.
-
-        This checks if the end of the buffer could be the beginning of the marker,
-        which means we should hold the buffer until we get more chunks.
-
-        Args:
-            buffer: The current chunk buffer.
-
-        Returns:
-            True if buffer might contain a partial marker, False otherwise.
-        """
-        # Check if buffer ends with any prefix of the marker
-        # For marker "[CONTINUE_LISTENING]", check for: "[", "[C", "[CO", "[CON", etc.
-        marker = CONTINUE_LISTENING_MARKER
-
-        # Check progressively longer prefixes of the marker
-        for i in range(1, len(marker)):
-            prefix = marker[:i]
-            if buffer.endswith(prefix):
-                _LOGGER.debug("Buffer ends with partial marker prefix: %r", prefix)
-                return True
-
-        return False
 
     def _handle_query_tools(
         self,
@@ -1051,7 +697,7 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
                     source_player=arguments.get("source_player"),
                 )
             elif tool_name == "get_music_players":
-                players = await handler.get_players()
+                players = await handler.load_and_cache_players()
                 return {
                     "success": True,
                     "players": players,
@@ -1105,6 +751,19 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         _LOGGER.info("Built %d messages for LLM (including system prompt)", len(messages))
         return messages
 
+    @staticmethod
+    async def _consume_stream(stream: Any) -> None:
+        """Consume an async generator/stream to completion.
+
+        This helper method makes the intent clear when we need to execute
+        a streaming operation but don't need to process individual items.
+
+        Args:
+            stream: An async iterable/generator to consume.
+        """
+        async for _ in stream:
+            pass
+
     async def async_added_to_hass(self) -> None:
         """When entity is added to Home Assistant."""
         await super().async_added_to_hass()
@@ -1119,6 +778,11 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         """When entity is removed from Home Assistant."""
         # Stop cleanup task before removing
         await self._conversation_manager.stop_cleanup_task()
+
+        # Close LLM provider client
+        if self._provider is not None and hasattr(self._provider, 'async_close'):
+            await self._provider.async_close()
+
         conversation.async_unset_agent(self.hass, self.entry)
         await super().async_will_remove_from_hass()
 

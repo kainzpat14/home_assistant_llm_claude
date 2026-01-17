@@ -8,6 +8,9 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
+from .const import MAX_MUSIC_SEARCH_RESULTS, VOLUME_SCALE_FACTOR
+from .music_utils import extract_room_name, fuzzy_match_room, normalize_room_name
+
 if TYPE_CHECKING:
     from homeassistant.components.conversation import ChatLog
 
@@ -26,8 +29,11 @@ class MusicAssistantHandler:
         """Check if Music Assistant integration is available."""
         return self.hass.services.has_service("music_assistant", "play_media")
 
-    async def get_players(self) -> list[dict[str, Any]]:
-        """Get all Music Assistant player entities with their state."""
+    async def load_and_cache_players(self) -> list[dict[str, Any]]:
+        """Load all Music Assistant player entities and cache room name mappings.
+
+        Note: This method has a side effect of populating _player_cache.
+        """
         players = []
 
         # Get entity registry
@@ -59,25 +65,10 @@ class MusicAssistantHandler:
                 })
 
                 # Cache room name mapping
-                room_name = self._extract_room_name(friendly_name, entity_id)
-                self._player_cache[room_name.lower()] = entity_id
+                room_name = extract_room_name(friendly_name, entity_id)
+                self._player_cache[normalize_room_name(room_name)] = entity_id
 
         return players
-
-    def _extract_room_name(self, friendly_name: str, entity_id: str) -> str:
-        """Extract room name from friendly name or entity_id."""
-        # Try friendly name first
-        if friendly_name:
-            # Remove common suffixes
-            for suffix in [" Speaker", " Player", " MA", " Music"]:
-                if friendly_name.endswith(suffix):
-                    return friendly_name[:-len(suffix)]
-            return friendly_name
-
-        # Fall back to entity_id parsing
-        # media_player.ma_living_room -> living room
-        name = entity_id.replace("media_player.", "").replace("ma_", "")
-        return name.replace("_", " ")
 
     def resolve_player(self, player_ref: str | None) -> str | None:
         """Resolve player reference (room name or entity_id) to entity_id.
@@ -95,21 +86,12 @@ class MusicAssistantHandler:
         if player_ref.startswith("media_player."):
             return player_ref
 
-        # Look up in cache
-        normalized = player_ref.lower().strip()
-        if normalized in self._player_cache:
-            return self._player_cache[normalized]
-
-        # Try fuzzy matching
-        for room_name, entity_id in self._player_cache.items():
-            if normalized in room_name or room_name in normalized:
-                return entity_id
-
-        return None
+        # Use fuzzy matching utility
+        return fuzzy_match_room(player_ref, self._player_cache)
 
     async def get_first_active_player(self) -> str | None:
         """Get the first player that is currently playing."""
-        players = await self.get_players()
+        players = await self.load_and_cache_players()
         for player in players:
             if player["state"] == "playing":
                 return player["entity_id"]
@@ -202,7 +184,7 @@ class MusicAssistantHandler:
         Returns:
             Currently playing information.
         """
-        players = await self.get_players()
+        players = await self.load_and_cache_players()
 
         if player:
             target_entity = self.resolve_player(player)
@@ -280,10 +262,21 @@ class MusicAssistantHandler:
             }
 
             if action == "volume_set" and volume_level is not None:
+                # Validate volume_level range
+                if not isinstance(volume_level, (int, float)):
+                    return {
+                        "success": False,
+                        "error": f"Invalid volume_level type: {type(volume_level).__name__}, expected number",
+                    }
+                if not 0 <= volume_level <= 100:
+                    return {
+                        "success": False,
+                        "error": f"Invalid volume_level: {volume_level}, must be between 0 and 100",
+                    }
                 await self.hass.services.async_call(
                     "media_player",
                     "volume_set",
-                    {"volume_level": volume_level / 100},
+                    {"volume_level": volume_level / VOLUME_SCALE_FACTOR},
                     target={"entity_id": target_entity},
                 )
             elif action in service_map:
@@ -339,7 +332,7 @@ class MusicAssistantHandler:
         try:
             service_data = {
                 "search": query,
-                "limit": min(limit, 50),
+                "limit": min(limit, MAX_MUSIC_SEARCH_RESULTS),
             }
 
             if media_type:

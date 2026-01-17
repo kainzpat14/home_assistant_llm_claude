@@ -14,9 +14,6 @@ if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
-# Set minimum log level to DEBUG to ensure debug logging capability
-# Home Assistant's configuration.yaml can still override this
-_LOGGER.setLevel(logging.DEBUG)
 
 PLATFORMS: list[Platform] = [Platform.CONVERSATION]
 
@@ -24,7 +21,7 @@ PLATFORMS: list[Platform] = [Platform.CONVERSATION]
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Voice Assistant LLM from a config entry."""
     _LOGGER.info("Setting up Voice Assistant LLM integration (entry_id: %s)", entry.entry_id)
-    _LOGGER.debug("Config entry data: %s", entry.data)
+    # Note: entry.data contains API key, do not log it
     _LOGGER.debug("Config entry options: %s", entry.options)
 
     hass.data.setdefault(DOMAIN, {})
