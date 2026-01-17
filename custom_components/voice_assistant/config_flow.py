@@ -22,6 +22,7 @@ from .const import (
     CONF_MAX_TOKENS,
     CONF_MODEL,
     CONF_PROVIDER,
+    CONF_SYSTEM_PROMPT,
     CONF_TEMPERATURE,
     DEFAULT_AUTO_CONTINUE_LISTENING,
     DEFAULT_CONVERSATION_TIMEOUT,
@@ -30,6 +31,7 @@ from .const import (
     DEFAULT_ENABLE_STREAMING,
     DEFAULT_MAX_TOKENS,
     DEFAULT_MODELS,
+    DEFAULT_SYSTEM_PROMPT,
     DEFAULT_TEMPERATURE,
     DOMAIN,
     PROVIDER_GROQ,
@@ -205,6 +207,17 @@ class VoiceAssistantOptionsFlow(OptionsFlow):
                             CONF_ENABLE_MUSIC_ASSISTANT, DEFAULT_ENABLE_MUSIC_ASSISTANT
                         ),
                     ): bool,
+                    vol.Optional(
+                        CONF_SYSTEM_PROMPT,
+                        description={"suggested_value": self.config_entry.options.get(
+                            CONF_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT
+                        )},
+                    ): selector.TextSelector(
+                        selector.TextSelectorConfig(
+                            multiline=True,
+                            type=selector.TextSelectorType.TEXT,
+                        )
+                    ),
                 }
             ),
             errors=errors,
