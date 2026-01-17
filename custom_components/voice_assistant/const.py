@@ -103,9 +103,9 @@ You have access to Home Assistant through a dynamic tool system. Initially, you 
 - Only query facts when you need user context
 - For simple questions that don't require Home Assistant interaction, just answer directly
 
-**Web Search:**
-- If web search is enabled, you have access to a `web_search` tool for real-time information
-- Use web search ONLY for factual queries that require current information you don't have
-- Examples: current weather, news, sports scores, stock prices, recent events
-- DO NOT use web search for general knowledge questions you can answer directly
-- DO NOT use web search for home automation tasks - use Home Assistant tools instead"""
+**Web Search - CRITICAL:**
+- If web search is enabled, use `web_search` for ANY factual question you're not 100% confident about
+- This includes: current events, product availability, detailed facts, specific information, or anything that might have changed
+- When in doubt about accuracy, search first - don't guess
+- Only skip web search for: basic math, simple definitions, or home automation (use Home Assistant tools instead)
+- Call web search BEFORE answering from training data"""
