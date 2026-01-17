@@ -85,14 +85,10 @@ class VoiceAssistantConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors["base"] = "cannot_connect"
 
             if not errors:
-                # Store API keys in data (sensitive), everything else in options
-                data = {CONF_API_KEY: user_input[CONF_API_KEY]}
-                if user_input.get(CONF_TAVILY_API_KEY):
-                    data[CONF_TAVILY_API_KEY] = user_input[CONF_TAVILY_API_KEY]
-
+                # Store only API key in data, everything else in options
                 return self.async_create_entry(
                     title="Voice Assistant LLM",
-                    data=data,
+                    data={CONF_API_KEY: user_input[CONF_API_KEY]},
                     options=DEFAULT_OPTIONS,
                 )
 
@@ -101,7 +97,6 @@ class VoiceAssistantConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_API_KEY): str,
-                    vol.Optional(CONF_TAVILY_API_KEY): str,
                 }
             ),
             errors=errors,

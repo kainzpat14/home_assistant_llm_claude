@@ -5,12 +5,10 @@
         "title": "Voice Assistant LLM",
         "description": "Enter your Groq API key to get started. You can get one from https://console.groq.com/keys",
         "data": {
-          "api_key": "API Key",
-          "tavily_api_key": "Tavily API Key (Optional)"
+          "api_key": "API Key"
         },
         "data_description": {
-          "api_key": "Your Groq API key",
-          "tavily_api_key": "Your Tavily API key for web search (get one from https://tavily.com)"
+          "api_key": "Your Groq API key"
         }
       }
     },
