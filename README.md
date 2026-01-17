@@ -6,6 +6,8 @@
 
 A custom Home Assistant integration that provides an LLM-powered conversation agent for voice assistants with direct API integration.
 
+> **⚠️ DISCLAIMER**: This project serves as a playground to test vibe coding and experimental features. It should **NOT** be used in production environments. Use at your own risk.
+
 ## Features
 
 - **Direct Home Assistant API Integration**: Bypasses the traditional intent system for more flexible control
