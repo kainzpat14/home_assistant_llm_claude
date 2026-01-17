@@ -5,12 +5,10 @@
         "title": "Voice Assistant LLM",
         "description": "Enter your Groq API key to get started. You can get one from https://console.groq.com/keys",
         "data": {
-          "api_key": "API Key",
-          "tavily_api_key": "Tavily API Key (Optional)"
+          "api_key": "API Key"
         },
         "data_description": {
-          "api_key": "Your Groq API key",
-          "tavily_api_key": "Your Tavily API key for web search (get one from https://tavily.com)"
+          "api_key": "Your Groq API key"
         }
       }
     },
@@ -40,6 +38,7 @@
           "auto_continue_listening": "Auto Continue Listening",
           "enable_music_assistant": "Enable Music Assistant",
           "enable_web_search": "Enable Web Search",
+          "tavily_api_key": "Tavily API Key",
           "system_prompt": "System Prompt"
         },
         "data_description": {
@@ -54,6 +53,7 @@
           "auto_continue_listening": "Automatically continue listening after responses",
           "enable_music_assistant": "Enable Music Assistant integration for music control",
           "enable_web_search": "Enable web search for factual queries (requires Tavily API key)",
+          "tavily_api_key": "Your Tavily API key for web search (get one from https://tavily.com)",
           "system_prompt": "Customize the system prompt for the assistant"
         }
       }

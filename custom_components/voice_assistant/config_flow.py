@@ -85,14 +85,10 @@ class VoiceAssistantConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors["base"] = "cannot_connect"
 
             if not errors:
-                # Store API keys in data (sensitive), everything else in options
-                data = {CONF_API_KEY: user_input[CONF_API_KEY]}
-                if user_input.get(CONF_TAVILY_API_KEY):
-                    data[CONF_TAVILY_API_KEY] = user_input[CONF_TAVILY_API_KEY]
-
+                # Store only API key in data, everything else in options
                 return self.async_create_entry(
                     title="Voice Assistant LLM",
-                    data=data,
+                    data={CONF_API_KEY: user_input[CONF_API_KEY]},
                     options=DEFAULT_OPTIONS,
                 )
 
@@ -101,7 +97,6 @@ class VoiceAssistantConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_API_KEY): str,
-                    vol.Optional(CONF_TAVILY_API_KEY): str,
                 }
             ),
             errors=errors,
@@ -124,6 +119,25 @@ class VoiceAssistantOptionsFlow(OptionsFlow):
             # Remove llm_hass_api if not selected
             if not user_input.get(CONF_LLM_HASS_API):
                 user_input.pop(CONF_LLM_HASS_API, None)
+
+            # Handle Tavily API key separately (stored in data, not options)
+            tavily_api_key = user_input.pop(CONF_TAVILY_API_KEY, None)
+
+            # Update entry.data with Tavily API key if provided
+            if tavily_api_key:
+                new_data = dict(self.config_entry.data)
+                new_data[CONF_TAVILY_API_KEY] = tavily_api_key
+                self.hass.config_entries.async_update_entry(
+                    self.config_entry, data=new_data
+                )
+            elif CONF_TAVILY_API_KEY in self.config_entry.data:
+                # If field was cleared, remove from data
+                if tavily_api_key == "":
+                    new_data = dict(self.config_entry.data)
+                    new_data.pop(CONF_TAVILY_API_KEY, None)
+                    self.hass.config_entries.async_update_entry(
+                        self.config_entry, data=new_data
+                    )
 
             # Validate the provider/model combination if changed
             try:
@@ -221,6 +235,10 @@ class VoiceAssistantOptionsFlow(OptionsFlow):
                             CONF_ENABLE_WEB_SEARCH, DEFAULT_ENABLE_WEB_SEARCH
                         ),
                     ): bool,
+                    vol.Optional(
+                        CONF_TAVILY_API_KEY,
+                        description={"suggested_value": self.config_entry.data.get(CONF_TAVILY_API_KEY, "")},
+                    ): str,
                     vol.Optional(
                         CONF_SYSTEM_PROMPT,
                         description={"suggested_value": self.config_entry.options.get(
