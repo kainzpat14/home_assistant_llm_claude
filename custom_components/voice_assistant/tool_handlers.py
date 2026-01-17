@@ -88,7 +88,24 @@ async def handle_query_tools_calls(
 
     query_tools_summary = []
     for tool_call in query_tools_calls:
-        arguments = json.loads(tool_call["function"]["arguments"])
+        try:
+            arguments = json.loads(tool_call["function"]["arguments"])
+        except json.JSONDecodeError as err:
+            _LOGGER.error(
+                "Invalid JSON in query_tools arguments: %s. Error: %s",
+                tool_call["function"]["arguments"],
+                err,
+            )
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call["id"],
+                "content": json.dumps({
+                    "success": False,
+                    "error": f"Invalid JSON in arguments: {err}",
+                }),
+            })
+            continue
+
         _LOGGER.info("Handling query_tools: %s", arguments)
 
         result = handle_query_tools_fn(arguments, current_tools, tool_manager)
@@ -133,7 +150,24 @@ async def handle_query_facts_calls(
 
     query_facts_summary = []
     for tool_call in query_facts_calls:
-        arguments = json.loads(tool_call["function"]["arguments"])
+        try:
+            arguments = json.loads(tool_call["function"]["arguments"])
+        except json.JSONDecodeError as err:
+            _LOGGER.error(
+                "Invalid JSON in query_facts arguments: %s. Error: %s",
+                tool_call["function"]["arguments"],
+                err,
+            )
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call["id"],
+                "content": json.dumps({
+                    "success": False,
+                    "error": f"Invalid JSON in arguments: {err}",
+                }),
+            })
+            continue
+
         _LOGGER.info("Handling query_facts: %s", arguments)
 
         result = handle_query_facts_fn(arguments)
@@ -178,7 +212,24 @@ async def handle_learn_fact_calls(
 
     learn_fact_summary = []
     for tool_call in learn_fact_calls:
-        arguments = json.loads(tool_call["function"]["arguments"])
+        try:
+            arguments = json.loads(tool_call["function"]["arguments"])
+        except json.JSONDecodeError as err:
+            _LOGGER.error(
+                "Invalid JSON in learn_fact arguments: %s. Error: %s",
+                tool_call["function"]["arguments"],
+                err,
+            )
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call["id"],
+                "content": json.dumps({
+                    "success": False,
+                    "error": f"Invalid JSON in arguments: {err}",
+                }),
+            })
+            continue
+
         _LOGGER.info("Handling learn_fact: %s", arguments)
 
         result = await handle_learn_fact_fn(arguments)
@@ -223,7 +274,25 @@ async def handle_music_tool_calls(
     music_summary = []
     for tool_call in music_tool_calls:
         tool_name = tool_call["function"]["name"]
-        arguments = json.loads(tool_call["function"]["arguments"])
+        try:
+            arguments = json.loads(tool_call["function"]["arguments"])
+        except json.JSONDecodeError as err:
+            _LOGGER.error(
+                "Invalid JSON in %s arguments: %s. Error: %s",
+                tool_name,
+                tool_call["function"]["arguments"],
+                err,
+            )
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call["id"],
+                "content": json.dumps({
+                    "success": False,
+                    "error": f"Invalid JSON in arguments: {err}",
+                }),
+            })
+            continue
+
         _LOGGER.info("Handling music tool %s: %s", tool_name, arguments)
 
         result = await handle_music_tool_fn(tool_name, arguments)

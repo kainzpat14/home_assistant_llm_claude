@@ -284,13 +284,15 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
         original_content_holder = []
 
         # Use async_add_delta_content_stream to handle streaming
-        async for content_obj in chat_log.async_add_delta_content_stream(
-            self.entity_id,
-            self._stream_response_with_tools(
-                messages, current_tools, tool_manager, chat_log, user_input, original_content_holder
-            ),
-        ):
-            pass  # Generator handles all streaming internally
+        # The generator handles all streaming internally; we just need to consume it
+        await self._consume_stream(
+            chat_log.async_add_delta_content_stream(
+                self.entity_id,
+                self._stream_response_with_tools(
+                    messages, current_tools, tool_manager, chat_log, user_input, original_content_holder
+                ),
+            )
+        )
 
         # Track ORIGINAL assistant message in session for fact learning (preserves marker for context)
         if original_content_holder:
@@ -748,6 +750,19 @@ class VoiceAssistantConversationAgent(conversation.ConversationEntity):
 
         _LOGGER.info("Built %d messages for LLM (including system prompt)", len(messages))
         return messages
+
+    @staticmethod
+    async def _consume_stream(stream: Any) -> None:
+        """Consume an async generator/stream to completion.
+
+        This helper method makes the intent clear when we need to execute
+        a streaming operation but don't need to process individual items.
+
+        Args:
+            stream: An async iterable/generator to consume.
+        """
+        async for _ in stream:
+            pass
 
     async def async_added_to_hass(self) -> None:
         """When entity is added to Home Assistant."""

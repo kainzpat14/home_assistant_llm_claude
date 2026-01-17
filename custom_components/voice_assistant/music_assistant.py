@@ -262,6 +262,17 @@ class MusicAssistantHandler:
             }
 
             if action == "volume_set" and volume_level is not None:
+                # Validate volume_level range
+                if not isinstance(volume_level, (int, float)):
+                    return {
+                        "success": False,
+                        "error": f"Invalid volume_level type: {type(volume_level).__name__}, expected number",
+                    }
+                if not 0 <= volume_level <= 100:
+                    return {
+                        "success": False,
+                        "error": f"Invalid volume_level: {volume_level}, must be between 0 and 100",
+                    }
                 await self.hass.services.async_call(
                     "media_player",
                     "volume_set",

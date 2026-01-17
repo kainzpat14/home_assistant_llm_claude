@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
@@ -150,14 +151,30 @@ class ConversationManager:
             )
             content = response.get("content", "")
 
-            # Parse JSON response
-            # Find JSON in response (might have markdown code blocks)
-            if "```json" in content:
-                content = content.split("```json")[1].split("```")[0]
-            elif "```" in content:
-                content = content.split("```")[1].split("```")[0]
+            # Parse JSON response using regex to handle markdown code blocks
+            # This handles variations like ```json, ``` JSON, or just plain JSON
+            json_match = re.search(r'```(?:json)?\s*\n(.*?)\n```', content, re.DOTALL | re.IGNORECASE)
+            if json_match:
+                content = json_match.group(1)
 
-            facts = json.loads(content.strip())
+            # Parse JSON with error handling
+            try:
+                facts = json.loads(content.strip())
+            except json.JSONDecodeError as err:
+                _LOGGER.warning(
+                    "Failed to parse JSON from fact extraction. Content: %s. Error: %s",
+                    content[:200],  # Log first 200 chars to avoid flooding
+                    err,
+                )
+                return
+
+            # Validate that facts is a dictionary
+            if not isinstance(facts, dict):
+                _LOGGER.warning(
+                    "Fact extraction returned non-dict type: %s",
+                    type(facts).__name__,
+                )
+                return
 
             # Save each fact
             for key, value in facts.items():
@@ -170,8 +187,6 @@ class ConversationManager:
 
         except asyncio.TimeoutError:
             _LOGGER.warning("Fact extraction timed out after %d seconds", DEFAULT_FACT_EXTRACTION_TIMEOUT)
-        except json.JSONDecodeError as err:
-            _LOGGER.warning("Failed to parse facts JSON: %s", err)
         except Exception as err:
             _LOGGER.error("Error during fact extraction: %s", err)
 

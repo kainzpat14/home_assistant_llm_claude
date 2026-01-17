@@ -29,7 +29,15 @@ class FactStore:
         """Load facts from storage."""
         data = await self._store.async_load()
         if data:
-            self._facts = data
+            # Validate that loaded data is a dictionary
+            if not isinstance(data, dict):
+                _LOGGER.error(
+                    "Storage data is not a dict, got %s. Resetting to empty dict.",
+                    type(data).__name__,
+                )
+                self._facts = {}
+            else:
+                self._facts = data
         _LOGGER.debug("Loaded %d facts from storage", len(self._facts))
 
     async def async_save(self) -> None:

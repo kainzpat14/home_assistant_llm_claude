@@ -6,6 +6,8 @@ of Home Assistant runtime.
 
 from __future__ import annotations
 
+import re
+
 
 def extract_room_name(friendly_name: str, entity_id: str) -> str:
     """Extract room name from friendly name or entity_id.
@@ -63,7 +65,10 @@ def fuzzy_match_room(
 ) -> str | None:
     """Fuzzy match a room query against available room names.
 
-    Performs substring matching in both directions to find the best match.
+    Uses a tiered matching strategy:
+    1. Exact match (highest priority)
+    2. Word boundary match (e.g., "living" matches "living room" but not "reliving")
+    3. Substring match (fallback for partial words like "liv" -> "living room")
 
     Args:
         query: The room name query (e.g., "living").
@@ -75,6 +80,8 @@ def fuzzy_match_room(
     Examples:
         >>> rooms = {"living room": "media_player.living", "bedroom": "media_player.bed"}
         >>> fuzzy_match_room("living", rooms)
+        'media_player.living'
+        >>> fuzzy_match_room("room", rooms)  # Word boundary: matches first occurrence
         'media_player.living'
         >>> fuzzy_match_room("bed", rooms)
         'media_player.bed'
@@ -91,7 +98,16 @@ def fuzzy_match_room(
     if normalized_query in available_rooms:
         return available_rooms[normalized_query]
 
-    # Try fuzzy matching
+    # Try word boundary matching first (more precise)
+    # Match query as a complete word in the room name
+    escaped_query = re.escape(normalized_query)
+    for room_name, entity_id in available_rooms.items():
+        # Check if query is a complete word in room_name
+        if re.search(rf'\b{escaped_query}\b', room_name):
+            return entity_id
+
+    # Fall back to substring matching if no word boundary match
+    # This handles cases like "liv" matching "living room"
     for room_name, entity_id in available_rooms.items():
         if normalized_query in room_name or room_name in normalized_query:
             return entity_id
