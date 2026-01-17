@@ -8,6 +8,6 @@
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/kainzpat14/home_assistant_llm_claude/issues",
   "loggers": ["custom_components.voice_assistant"],
-  "requirements": ["groq>=0.4.0"],
+  "requirements": ["groq>=0.4.0", "tavily-python>=0.3.0"],
   "version": "0.1.0"
 }

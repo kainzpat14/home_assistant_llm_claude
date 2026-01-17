@@ -235,6 +235,38 @@ GET_MUSIC_PLAYERS_DEFINITION = {
     },
 }
 
+# Web Search (Tavily) tool
+WEB_SEARCH_DEFINITION = {
+    "type": "function",
+    "function": {
+        "name": "web_search",
+        "description": "Search the web for current, factual information using Tavily. Use ONLY for queries requiring real-time data you don't have (news, weather, sports scores, stock prices, recent events). DO NOT use for general knowledge or home automation.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query for current factual information",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum number of results to return (1-10)",
+                    "default": 5,
+                    "minimum": 1,
+                    "maximum": 10,
+                },
+                "search_depth": {
+                    "type": "string",
+                    "description": "Search depth: 'basic' for quick results, 'advanced' for comprehensive search",
+                    "enum": ["basic", "advanced"],
+                    "default": "basic",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+}
+
 
 class LLMToolManager:
     """Manager for dynamic LLM tool discovery using chat_log."""
@@ -391,14 +423,18 @@ class LLMToolManager:
             return {"success": False, "error": str(err)}
 
     @staticmethod
-    def get_initial_tools(include_music: bool = False) -> list[dict[str, Any]]:
+    def get_initial_tools(
+        include_music: bool = False,
+        include_web_search: bool = False,
+    ) -> list[dict[str, Any]]:
         """Get initial meta-tools available to the LLM.
 
         Args:
             include_music: Whether to include Music Assistant tools.
+            include_web_search: Whether to include web search tool.
 
         Returns:
-            List with query_tools, query_facts, learn_fact, and optionally music tools.
+            List with query_tools, query_facts, learn_fact, and optionally music/web search tools.
         """
         tools = [QUERY_TOOLS_DEFINITION, QUERY_FACTS_DEFINITION, LEARN_FACT_DEFINITION]
 
@@ -411,5 +447,8 @@ class LLMToolManager:
                 TRANSFER_MUSIC_DEFINITION,
                 GET_MUSIC_PLAYERS_DEFINITION,
             ])
+
+        if include_web_search:
+            tools.append(WEB_SEARCH_DEFINITION)
 
         return tools

@@ -31,7 +31,7 @@ _LOGGER = logging.getLogger(__name__)
 
 def categorize_tool_calls(
     tool_calls: list[dict[str, Any]]
-) -> tuple[list, list, list, list, list]:
+) -> tuple[list, list, list, list, list, list]:
     """Categorize tool calls into different types.
 
     Args:
@@ -39,12 +39,13 @@ def categorize_tool_calls(
 
     Returns:
         Tuple of (query_tools_calls, query_facts_calls, learn_fact_calls,
-                 music_tool_calls, ha_tool_calls).
+                 music_tool_calls, web_search_calls, ha_tool_calls).
     """
     query_tools_calls = []
     query_facts_calls = []
     learn_fact_calls = []
     music_tool_calls = []
+    web_search_calls = []
     ha_tool_calls = []
 
     for tool_call in tool_calls:
@@ -58,11 +59,13 @@ def categorize_tool_calls(
         elif tool_name in ["play_music", "get_now_playing", "control_playback",
                              "search_music", "transfer_music", "get_music_players"]:
             music_tool_calls.append(tool_call)
+        elif tool_name == "web_search":
+            web_search_calls.append(tool_call)
         else:
             ha_tool_calls.append(tool_call)
 
     return (query_tools_calls, query_facts_calls, learn_fact_calls,
-            music_tool_calls, ha_tool_calls)
+            music_tool_calls, web_search_calls, ha_tool_calls)
 
 
 async def handle_query_tools_calls(
@@ -310,6 +313,68 @@ async def handle_music_tool_calls(
         summary_content = AssistantContent(
             agent_id=DOMAIN,
             content="\n".join(music_summary),
+        )
+        chat_log.async_add_assistant_content_without_tools(summary_content)
+
+
+async def handle_web_search_calls(
+    web_search_calls: list[dict[str, Any]],
+    messages: list[dict[str, Any]],
+    chat_log: ChatLog,
+    handle_web_search_fn: callable,
+) -> None:
+    """Handle web search tool calls.
+
+    Args:
+        web_search_calls: List of web search tool calls.
+        messages: Messages list (will be modified).
+        chat_log: The chat log.
+        handle_web_search_fn: Async function to handle individual web search call.
+    """
+    if not web_search_calls:
+        return
+
+    web_search_summary = []
+    for tool_call in web_search_calls:
+        try:
+            arguments = json.loads(tool_call["function"]["arguments"])
+        except json.JSONDecodeError as err:
+            _LOGGER.error(
+                "Invalid JSON in web_search arguments: %s. Error: %s",
+                tool_call["function"]["arguments"],
+                err,
+            )
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call["id"],
+                "content": json.dumps({
+                    "success": False,
+                    "error": f"Invalid JSON in arguments: {err}",
+                }),
+            })
+            continue
+
+        _LOGGER.info("Handling web_search: %s", arguments)
+
+        result = await handle_web_search_fn(arguments)
+
+        messages.append({
+            "role": "tool",
+            "tool_call_id": tool_call["id"],
+            "content": json.dumps(result),
+        })
+
+        if result.get("success"):
+            query = arguments.get("query", "unknown")
+            num_results = len(result.get("results", []))
+            web_search_summary.append(
+                f"Found {num_results} web results for: {query}"
+            )
+
+    if web_search_summary:
+        summary_content = AssistantContent(
+            agent_id=DOMAIN,
+            content="\n".join(web_search_summary),
         )
         chat_log.async_add_assistant_content_without_tools(summary_content)
 
